@@ -1,0 +1,2298 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.github/
+  workflows/
+    ci.yml
+admin-ui/
+  Dockerfile
+  index.html
+client-ui/
+  app.js
+  Dockerfile
+  index.html
+  style.css
+grafana/
+  provisioning/
+    dashboards/
+      dashboard.json
+      provider.yml
+    datasources/
+      datasource.yml
+identity-provider/
+  tests/
+    identity.test.js
+  Dockerfile
+  index.js
+  package.json
+k8s/
+  base/
+    order-gateway.yml
+kitchen-queue/
+  tests/
+    kitchen.test.js
+  Dockerfile
+  index.js
+  package.json
+load-tests/
+  load-test-all.js
+  load-test.js
+  package.json
+nginx/
+  nginx.conf
+notification-hub/
+  tests/
+    notification.test.js
+  Dockerfile
+  index.js
+  package.json
+observability-configs/
+  promtail/
+    promtail-config.yml
+order-gateway/
+  tests/
+    order.test.js
+  Dockerfile
+  index.js
+  package.json
+prometheus/
+  prometheus.yml
+scripts/
+  chaos-monkey.js
+stock-service/
+  tests/
+    stock.test.js
+  add_deps.sh
+  Dockerfile
+  index.js
+  package.json
+terraform/
+  main.tf
+  outputs.tf
+  variables.tf
+docker-compose.yml
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".github/workflows/ci.yml">
+name: IUT Cafeteria CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test_services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [identity-provider, order-gateway, stock-service, kitchen-queue, notification-hub]
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+          cache-dependency-path: './${{ matrix.service }}/package-lock.json'
+          
+      - name: Install dependencies
+        working-directory: ./${{ matrix.service }}
+        run: npm ci || npm install
+        
+      - name: Run Unit Tests
+        working-directory: ./${{ matrix.service }}
+        run: npm test
+
+  build_images:
+    needs: test_services
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service: [identity-provider, order-gateway, stock-service, kitchen-queue, notification-hub]
+        
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./${{ matrix.service }}
+          push: false
+          tags: iut-cafeteria/${{ matrix.service }}:latest
+          load: true # Load image for scanning
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'iut-cafeteria/${{ matrix.service }}:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+</file>
+
+<file path="admin-ui/Dockerfile">
+FROM nginx:alpine
+COPY index.html /usr/share/nginx/html/index.html
+EXPOSE 80
+</file>
+
+<file path="admin-ui/index.html">
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - System Health</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 2rem;
+        }
+
+        h1 {
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+
+        .service-name {
+            font-weight: bold;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .healthy {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .down {
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+        }
+
+        .metrics {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        .chaostoggle {
+            margin-top: 15px;
+            width: 100%;
+            background: #b91c1c;
+            border: none;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .chaostoggle:hover {
+            background: #991b1b;
+        }
+
+        #global-metrics {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            background: #1e293b;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .metric-big {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: #38bdf8;
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            color: #cbd5e1;
+        }
+
+        #latency-alert {
+            display: none;
+            background: #ef4444;
+            color: white;
+            font-weight: bold;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>System Observability Dashboard</h1>
+
+    <div id="latency-alert">⚠️ HIGH LATENCY ALERT: Gateway average response time has exceeded 1 second!</div>
+
+    <div id="global-metrics">
+        <div>
+            <div class="metric-big" id="total-orders">0</div>
+            <div class="metric-label">Total Orders Processed</div>
+        </div>
+        <div>
+            <div class="metric-big" id="avg-latency">-</div>
+            <div class="metric-label">Avg Gateway Latency (s)</div>
+        </div>
+        <div>
+            <div class="metric-big" id="kitchen-backlog">0</div>
+            <div class="metric-label">Kitchen Processed</div>
+        </div>
+    </div>
+
+    <div class="grid" id="services-grid">
+        <!-- populated via js -->
+    </div>
+
+    <script>
+        const services = [
+            { name: "Identity Provider", url: "http://localhost:3001", hasChaos: true },
+            { name: "Order Gateway", url: "http://localhost:3003", hasChaos: true },
+            { name: "Stock Service", url: "http://localhost:3002", hasChaos: true },
+            { name: "Kitchen Queue", url: "http://localhost:3004", hasChaos: true },
+            { name: "Notification Hub", url: "http://localhost:3005", hasChaos: true }
+        ];
+
+        let latencyHistory = []; // Stores { timestamp, sum, count } for Order Gateway
+
+        const grid = document.getElementById('services-grid');
+
+        // Render cards
+        services.forEach((s, i) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="service-name"><span class="status-indicator down" id="status-${i}"></span>${s.name}</div>
+                <div class="metrics" id="metrics-${i}">Metrics loading...</div>
+                ${s.hasChaos ? `<button class="chaostoggle" onclick="killService('${s.url}')">💀 Kill Service (Chaos)</button>` : ''}
+            `;
+            grid.appendChild(card);
+        });
+
+        async function killService(url) {
+            try { await fetch(`${url}/chaos`, { method: 'POST' }); } catch (e) { }
+        }
+
+        async function poll() {
+            for (let i = 0; i < services.length; i++) {
+                const s = services[i];
+                try {
+                    const res = await fetch(`${s.url}/health`);
+                    const indicator = document.getElementById(`status-${i}`);
+                    if (res.ok) {
+                        indicator.className = 'status-indicator healthy';
+                        fetchMetrics(s.url, i, s.name);
+                    } else {
+                        throw new Error();
+                    }
+                } catch (e) {
+                    document.getElementById(`status-${i}`).className = 'status-indicator down';
+                    document.getElementById(`metrics-${i}`).innerText = "Service Unreachable";
+                }
+            }
+        }
+
+        async function fetchMetrics(url, i, name) {
+            try {
+                const res = await fetch(`${url}/metrics`);
+                const text = await res.text();
+
+                let metricsHtml = "";
+
+                if (name === "Order Gateway") {
+                    const totalMatch = text.match(/orders_total (\d+)/);
+                    if (totalMatch) {
+                        metricsHtml += `Orders: ${totalMatch[1]}<br>`;
+                        document.getElementById('total-orders').innerText = totalMatch[1];
+                    }
+                    const latencySum = text.match(/gateway_response_time_seconds_sum ([\d.]+)/);
+                    const latencyCount = text.match(/gateway_response_time_seconds_count (\d+)/);
+
+                    if (latencySum && latencyCount) {
+                        const now = Date.now();
+                        const currentSum = parseFloat(latencySum[1]);
+                        const currentCount = parseInt(latencyCount[1]);
+
+                        latencyHistory.push({ timestamp: now, sum: currentSum, count: currentCount });
+                        const thirtySecondsAgo = now - 30000;
+                        latencyHistory = latencyHistory.filter(h => h.timestamp > thirtySecondsAgo);
+
+                        let displayAvg = (currentSum / currentCount).toFixed(3);
+
+                        if (latencyHistory.length > 1) {
+                            const first = latencyHistory[0];
+                            const last = latencyHistory[latencyHistory.length - 1];
+                            const deltaSum = last.sum - first.sum;
+                            const deltaCount = last.count - first.count;
+
+                            if (deltaCount > 0) {
+                                displayAvg = (deltaSum / deltaCount).toFixed(3);
+                            }
+                        }
+
+                        document.getElementById('avg-latency').innerText = displayAvg;
+                        metricsHtml += `Latency (30s): ${displayAvg}s <br>`;
+
+                        if (parseFloat(displayAvg) > 1.0) {
+                            document.getElementById('avg-latency').style.color = '#ef4444';
+                            document.getElementById('latency-alert').style.display = 'block';
+                        } else {
+                            document.getElementById('avg-latency').style.color = '#38bdf8';
+                            document.getElementById('latency-alert').style.display = 'none';
+                        }
+                    }
+                } else if (name === "Kitchen Queue") {
+                    const procMatch = text.match(/kitchen_processed_total (\d+)/);
+                    if (procMatch) {
+                        metricsHtml += `Processed: ${procMatch[1]}<br>`;
+                        document.getElementById('kitchen-backlog').innerText = procMatch[1];
+                    }
+                } else if (name === "Identity Provider") {
+                    const loginMatch = text.match(/login_total (\d+)/);
+                    if (loginMatch) metricsHtml += `Logins: ${loginMatch[1]}<br>`;
+                }
+
+                document.getElementById(`metrics-${i}`).innerHTML = metricsHtml || "Healthy";
+            } catch (e) { }
+        }
+
+        setInterval(poll, 2000);
+        poll();
+    </script>
+</body>
+
+</html>
+</file>
+
+<file path="client-ui/app.js">
+document.addEventListener('DOMContentLoaded', () => {
+    const GATEWAY_URL = 'http://localhost:3003';
+    const IDP_URL = 'http://localhost:3001';
+    const NOTIF_HUB_URL = 'http://localhost:3005';
+
+    const loginForm = document.getElementById('login-form');
+    const loginSection = document.getElementById('login-section');
+    const orderSection = document.getElementById('order-section');
+    const statusSection = document.getElementById('status-section');
+    const userInfo = document.getElementById('user-info');
+    const studentIdDisplay = document.getElementById('student-id-display');
+    const logoutBtn = document.getElementById('logout-btn');
+    const orderBtn = document.getElementById('order-btn');
+    const loginError = document.getElementById('login-error');
+    const orderError = document.getElementById('order-error');
+
+    let token = localStorage.getItem('token');
+    let currentStudentId = localStorage.getItem('studentId');
+    let socket = null;
+
+    const show = (el) => el.classList.remove('hidden');
+    const hide = (el) => el.classList.add('hidden');
+
+    function updateTracker(status) {
+        const steps = ['pending', 'verified', 'kitchen', 'ready'];
+        let currentIdx = -1;
+        if (status === 'Pending') currentIdx = 0;
+        if (status === 'Verified') currentIdx = 1; // Simulated
+        if (status === 'Confirmed' || status === 'In Kitchen') currentIdx = 2;
+        if (status === 'Ready') currentIdx = 3;
+
+        steps.forEach((step, idx) => {
+            const el = document.getElementById(`step-${step}`);
+            el.className = 'step'; // reset
+            if (idx < currentIdx) el.classList.add('completed');
+            if (idx === currentIdx) {
+                el.classList.add('completed');
+                el.classList.add('active'); // highlight current
+            }
+        });
+    }
+
+    function initSocket() {
+        if (socket) socket.disconnect();
+        socket = io(NOTIF_HUB_URL, { query: { studentId: currentStudentId } });
+
+        socket.on('orderStatus', (data) => {
+            console.log('Status update:', data);
+            updateTracker(data.status);
+            if (data.status === 'Ready') {
+                setTimeout(() => {
+                    alert('Your Iftar is Ready!');
+                    hide(statusSection);
+                    show(orderSection);
+                }, 1000);
+            }
+        });
+    }
+
+    if (token && currentStudentId) {
+        setupLoggedInState();
+    }
+
+    function setupLoggedInState() {
+        hide(loginSection);
+        show(orderSection);
+        show(userInfo);
+        studentIdDisplay.textContent = currentStudentId;
+        initSocket();
+    }
+
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('studentId').value;
+        const pwd = document.getElementById('password').value;
+        hide(loginError);
+
+        try {
+            const res = await fetch(`${IDP_URL}/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ studentId: id, password: pwd })
+            });
+            const data = await res.json();
+
+            if (!res.ok) throw new Error(data.error || 'Login failed');
+
+            token = data.token;
+            currentStudentId = data.studentId;
+            localStorage.setItem('token', token);
+            localStorage.setItem('studentId', currentStudentId);
+
+            setupLoggedInState();
+        } catch (err) {
+            orderSection.classList.add('hidden'); // ensure
+            loginError.textContent = err.message;
+            show(loginError);
+        }
+    });
+
+    logoutBtn.addEventListener('click', () => {
+        localStorage.clear();
+        token = null;
+        currentStudentId = null;
+        if (socket) socket.disconnect();
+
+        hide(userInfo);
+        hide(orderSection);
+        hide(statusSection);
+        show(loginSection);
+    });
+
+    orderBtn.addEventListener('click', async () => {
+        try {
+            orderBtn.disabled = true;
+            hide(orderError);
+            const idempotencyKey = crypto.randomUUID();
+            const res = await fetch(`${GATEWAY_URL}/order`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Order failed');
+
+            hide(orderSection);
+            show(statusSection);
+            updateTracker('Pending');
+
+            // Simulate Gateway verified -> Verified tracker update
+            setTimeout(() => {
+                updateTracker('Verified');
+            }, 500);
+
+        } catch (err) {
+            orderError.textContent = err.message;
+            show(orderError);
+        } finally {
+            orderBtn.disabled = false;
+        }
+    });
+});
+</file>
+
+<file path="client-ui/Dockerfile">
+FROM nginx:alpine
+COPY index.html /usr/share/nginx/html/index.html
+COPY style.css /usr/share/nginx/html/style.css
+COPY app.js /usr/share/nginx/html/app.js
+EXPOSE 80
+</file>
+
+<file path="client-ui/index.html">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IUT Cafeteria - Student Journey</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>IUT Cafeteria ✨</h1>
+            <div id="user-info" class="hidden">
+                <span id="student-id-display"></span>
+                <button id="logout-btn">Logout</button>
+            </div>
+        </header>
+
+        <main>
+            <!-- Login Section -->
+            <section id="login-section" class="card">
+                <h2>Student Login</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="studentId">Student ID</label>
+                        <input type="text" id="studentId" required placeholder="e.g. user123">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" required placeholder="password">
+                    </div>
+                    <button type="submit" class="btn primary">Login</button>
+                    <div id="login-error" class="error hidden"></div>
+                </form>
+            </section>
+
+            <!-- Order Section -->
+            <section id="order-section" class="card hidden">
+                <h2>Iftar Menu</h2>
+                <div class="menu-item">
+                    <div class="item-info">
+                        <h3>Iftar Box Premium</h3>
+                        <p>Dates, Biryani, Water</p>
+                    </div>
+                    <button id="order-btn" class="btn primary">Order Now</button>
+                </div>
+                <div id="order-error" class="error hidden"></div>
+            </section>
+
+            <!-- Status Tracker -->
+            <section id="status-section" class="card hidden">
+                <h2>Live Order Tracker</h2>
+                <div class="tracker">
+                    <div class="step" id="step-pending">Pending</div>
+                    <div class="step" id="step-verified">Stock Verified</div>
+                    <div class="step" id="step-kitchen">In Kitchen</div>
+                    <div class="step" id="step-ready">Ready</div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
+</file>
+
+<file path="client-ui/style.css">
+:root {
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --bg: #f8fafc;
+    --card-bg: #ffffff;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --error: #ef4444;
+    --success: #10b981;
+    --border: #e2e8f0;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+#app { max-width: 600px; margin: 0 auto; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+h1 { font-size: 1.5rem; font-weight: 700; }
+.card { background: var(--card-bg); border-radius: 12px; padding: 2rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); margin-bottom: 1rem; }
+h2 { margin-bottom: 1.5rem; font-size: 1.25rem; }
+.hidden { display: none !important; }
+
+.form-group { margin-bottom: 1rem; }
+label { display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.875rem; }
+input { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-family: inherit; }
+.btn { display: inline-block; width: 100%; padding: 0.75rem 1.5rem; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.btn.primary { background: var(--primary); color: white; }
+.btn.primary:hover { background: var(--primary-hover); }
+
+.error { color: var(--error); font-size: 0.875rem; margin-top: 0.5rem; padding: 0.5rem; background: #fef2f2; border-radius: 6px; }
+
+.menu-item { display: flex; justify-content: space-between; align-items: center; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; }
+.item-info h3 { margin-bottom: 0.25rem; font-size: 1rem; }
+.item-info p { color: var(--text-muted); font-size: 0.875rem; }
+
+.tracker { display: flex; justify-content: space-between; position: relative; }
+.tracker::before { content: ''; position: absolute; top: 12px; left: 0; right: 0; height: 2px; background: var(--border); z-index: 1; }
+.step { position: relative; z-index: 2; background: white; padding: 0.25rem 0.5rem; border: 2px solid var(--border); border-radius: 12px; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-align: center; width: 80px; transition: all 0.3s ease; }
+.step.active { border-color: var(--primary); color: var(--primary); }
+.step.completed { background: var(--success); border-color: var(--success); color: white; }
+</file>
+
+<file path="grafana/provisioning/dashboards/dashboard.json">
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "datasource": "Prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "id": 2,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "targets": [
+                {
+                    "exemplar": true,
+                    "expr": "rate(gateway_response_time_seconds_sum[1m]) / rate(gateway_response_time_seconds_count[1m])",
+                    "interval": "",
+                    "legendFormat": "Gateway Latency",
+                    "refId": "A"
+                }
+            ],
+            "title": "Average Gateway Latency (Seconds)",
+            "type": "timeseries"
+        },
+        {
+            "datasource": "Prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "gradientMode": "none",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "id": 4,
+            "options": {
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "single",
+                    "sort": "none"
+                }
+            },
+            "targets": [
+                {
+                    "exemplar": true,
+                    "expr": "rate(orders_total[1m])",
+                    "interval": "",
+                    "legendFormat": "Orders Throughput",
+                    "refId": "A"
+                }
+            ],
+            "title": "Orders per second (Gateway)",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 30,
+    "style": "dark",
+    "tags": [],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "IUT Cafeteria Crisis - Performance",
+    "uid": "iut_cafeteria",
+    "version": 1
+}
+</file>
+
+<file path="grafana/provisioning/dashboards/provider.yml">
+apiVersion: 1
+
+providers:
+  - name: 'Standard Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+</file>
+
+<file path="grafana/provisioning/datasources/datasource.yml">
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+</file>
+
+<file path="identity-provider/tests/identity.test.js">
+const request = require('supertest');
+
+jest.mock('pg', () => {
+    return {
+        Pool: jest.fn(() => ({
+            query: jest.fn().mockResolvedValue({ rows: [{ id: 'user123', password_hash: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8' }] }),
+            connect: jest.fn().mockResolvedValue({
+                query: jest.fn().mockResolvedValue({}),
+                release: jest.fn()
+            })
+        }))
+    };
+});
+
+jest.mock('ioredis', () => {
+    return jest.fn().mockImplementation(() => ({
+        incr: jest.fn().mockResolvedValue(1),
+        expire: jest.fn(),
+        ping: jest.fn()
+    }));
+});
+
+const app = require('../index');
+
+describe('Identity Provider Tests', () => {
+    it('should login successfully and return token', async () => {
+        const res = await request(app)
+            .post('/login')
+            .send({ studentId: 'user123', password: 'password' });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toHaveProperty('token');
+        expect(res.body.studentId).toBe('user123');
+    });
+
+    it('should reject missing credentials', async () => {
+        const res = await request(app)
+            .post('/login')
+            .send({ password: 'password' }); // Missing studentId
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBe('Missing credentials');
+    });
+});
+</file>
+
+<file path="identity-provider/Dockerfile">
+# Build Stage
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# Production Stage
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app ./
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+CMD ["node", "index.js"]
+</file>
+
+<file path="identity-provider/package.json">
+{
+  "name": "identity-provider",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "ioredis": "^5.9.3",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "pg": "^8.18.0",
+    "prom-client": "^15.1.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2"
+  }
+}
+</file>
+
+<file path="k8s/base/order-gateway.yml">
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-gateway
+  labels:
+    app: order-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-gateway
+  template:
+    metadata:
+      labels:
+        app: order-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: iut-cafeteria/order-gateway:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        - name: STOCK_SERVICE_URL
+          value: "http://stock-service:3000"
+        - name: REDIS_URL
+          value: "redis://redis-svc:6379"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-gateway
+spec:
+  selector:
+    app: order-gateway
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: LoadBalancer
+</file>
+
+<file path="kitchen-queue/tests/kitchen.test.js">
+const request = require('supertest');
+
+jest.mock('bullmq', () => {
+    return {
+        Queue: jest.fn().mockImplementation(() => ({
+            add: jest.fn().mockResolvedValue(true)
+        })),
+        Worker: jest.fn()
+    };
+});
+
+jest.mock('axios', () => ({
+    post: jest.fn().mockResolvedValue({ data: { success: true } })
+}));
+
+jest.mock('ioredis', () => {
+    return jest.fn().mockImplementation(() => ({
+        ping: jest.fn().mockResolvedValue('PONG')
+    }));
+});
+
+const app = require('../index');
+
+describe('Kitchen Queue Post Process Tests', () => {
+    it('should add order to queue successfully', async () => {
+        const res = await request(app)
+            .post('/process')
+            .send({ orderId: 'ord-1234', itemId: 'iftar_box', quantity: 1, studentId: 'user123' });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.status).toBe('Order accepted to Kitchen');
+    });
+
+    it('should reject missing orderId', async () => {
+        const res = await request(app)
+            .post('/process')
+            .send({ itemId: 'iftar_box' });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.text).toBe('Missing orderId');
+    });
+});
+</file>
+
+<file path="kitchen-queue/Dockerfile">
+# Build Stage
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# Production Stage
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app ./
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+CMD ["node", "index.js"]
+</file>
+
+<file path="kitchen-queue/index.js">
+const express = require('express');
+const { Queue, Worker } = require('bullmq');
+const axios = require('axios');
+const Redis = require('ioredis');
+const cors = require('cors');
+const client = require('prom-client');
+const morgan = require('morgan');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(morgan('dev'));
+
+const PORT = process.env.PORT || 3000;
+const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
+const connection = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
+const NOTIFICATION_HUB_URL = process.env.NOTIFICATION_HUB_URL || 'http://notification-hub:3000';
+
+// Metrics
+const register = new client.Registry();
+const ordersProcessedTotal = new client.Counter({ name: 'kitchen_processed_total', help: 'Total kitchen orders processed' });
+register.registerMetric(ordersProcessedTotal);
+
+// Worker to process background prep in 3-7 seconds
+const worker = new Worker('kitchen', async job => {
+    const { orderId, studentId } = job.data;
+    const prepTime = Math.floor(Math.random() * 4000) + 3000; // 3 to 7 seconds
+
+    // PUSH Confirmed status immediately upon starting work
+    try {
+        await axios.post(`${NOTIFICATION_HUB_URL}/notify`, { orderId, studentId, status: 'In Kitchen' }).catch(e => console.error(e.message));
+    } catch (err) { }
+
+    await new Promise(resolve => setTimeout(resolve, prepTime));
+
+    // PUSH Ready status when done
+    try {
+        await axios.post(`${NOTIFICATION_HUB_URL}/notify`, { orderId, studentId, status: 'Ready' });
+    } catch (e) { console.error("Could not notify", e.message); }
+
+    ordersProcessedTotal.inc();
+}, { connection });
+
+app.post('/chaos', (req, res) => { res.send('Dying'); setTimeout(() => process.exit(1), 500); });
+
+app.get('/health', async (req, res) => {
+    try {
+        await connection.ping();
+        res.status(200).send('OK');
+    } catch (e) {
+        res.status(503).send('Service Unavailable');
+    }
+});
+
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
+
+if (require.main === module) {
+    app.listen(PORT, () => console.log(`Kitchen Queue running on port ${PORT}`));
+}
+module.exports = app;
+</file>
+
+<file path="kitchen-queue/package.json">
+{
+  "name": "kitchen-queue",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.13.5",
+    "bullmq": "^5.70.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ioredis": "^5.9.3",
+    "morgan": "^1.10.1",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2"
+  }
+}
+</file>
+
+<file path="load-tests/load-test-all.js">
+const autocannon = require('autocannon');
+const axios = require('axios');
+
+const BASE_URLS = {
+    identity: 'http://localhost:3001',
+    stock: 'http://localhost:3002',
+    order: 'http://localhost:3003',
+    kitchen: 'http://localhost:3004',
+    notification: 'http://localhost:3005'
+};
+
+const results = [];
+
+async function runTest(name, config) {
+    return new Promise((resolve) => {
+        console.log(`\nStarting load test: ${name}`);
+        const instance = autocannon(config, (err, result) => {
+            if (err) {
+                console.error(`Error in ${name}:`, err.message);
+                return resolve();
+            }
+            console.log(`Finished ${name}. Reqs/s: ${result.requests.average}, Avg Latency: ${result.latency.average}ms, Errors: ${result.errors}`);
+            results.push({ name, result });
+            resolve();
+        });
+    });
+}
+
+async function main() {
+    console.log("=========================================");
+    console.log("   TESTING 15 SAFE ROUTES UNDER LOAD");
+    console.log("=========================================");
+
+    // 1. HEALTH CHECKS
+    await runTest('1. Identity Provider /health (GET)', { url: `${BASE_URLS.identity}/health`, connections: 10, duration: 3 });
+    await runTest('2. Order Gateway /health (GET)', { url: `${BASE_URLS.order}/health`, connections: 10, duration: 3 });
+    await runTest('3. Stock Service /health (GET)', { url: `${BASE_URLS.stock}/health`, connections: 10, duration: 3 });
+    await runTest('4. Kitchen Queue /health (GET)', { url: `${BASE_URLS.kitchen}/health`, connections: 10, duration: 3 });
+    await runTest('5. Notification Hub /health (GET)', { url: `${BASE_URLS.notification}/health`, connections: 10, duration: 3 });
+
+    // 2. METRICS
+    await runTest('6. Identity Provider /metrics (GET)', { url: `${BASE_URLS.identity}/metrics`, connections: 10, duration: 3 });
+    await runTest('7. Order Gateway /metrics (GET)', { url: `${BASE_URLS.order}/metrics`, connections: 10, duration: 3 });
+    await runTest('8. Stock Service /metrics (GET)', { url: `${BASE_URLS.stock}/metrics`, connections: 10, duration: 3 });
+    await runTest('9. Kitchen Queue /metrics (GET)', { url: `${BASE_URLS.kitchen}/metrics`, connections: 10, duration: 3 });
+    await runTest('10. Notification Hub /metrics (GET)', { url: `${BASE_URLS.notification}/metrics`, connections: 10, duration: 3 });
+
+    // 3. CORE BUSINESS ROUTES
+    // Get token for order gateway
+    let token = '';
+    try {
+        const res = await axios.post(`${BASE_URLS.identity}/login`, { studentId: 'user123', password: 'password' });
+        token = res.data.token;
+    } catch (e) {
+        console.log("Could not obtain token: ", e.message);
+    }
+
+    await runTest('11. Identity /login (POST)', {
+        url: `${BASE_URLS.identity}/login`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ studentId: 'user123', password: 'password' })
+    });
+
+    await runTest('12. Order Gateway /order (POST)', {
+        url: `${BASE_URLS.order}/order`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey: `load-test-${Date.now()}` })
+    });
+
+    await runTest('13. Stock Service /deduct (POST)', {
+        url: `${BASE_URLS.stock}/deduct`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, orderId: `load-${Date.now()}` })
+    });
+
+    await runTest('14. Kitchen Queue /process (POST)', {
+        url: `${BASE_URLS.kitchen}/process`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ orderId: 'ord-123', itemId: 'iftar_box', quantity: 1, studentId: 'user123' })
+    });
+
+    await runTest('15. Notification Hub /notify (POST)', {
+        url: `${BASE_URLS.notification}/notify`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ orderId: 'ord-123', studentId: 'user123', status: 'Ready' })
+    });
+
+    console.log("\n==================== SUMMARY ====================");
+    for (const r of results) {
+        if (r.result) {
+            console.log(`${r.name.padEnd(45)} => Avg: ${Math.round(r.result.requests.average)} req/s | Latency: ${Math.round(r.result.latency.average)}ms | Errors: ${r.result.errors}`);
+        }
+    }
+
+    console.log("\n=========================================");
+    console.log("   TESTING THE 5 DESTRUCTIVE CHAOS ROUTES");
+    console.log("=========================================");
+    console.log("Warning: These endpoints are designed to crash the servers immediately. Sending requests...");
+
+    try { await axios.post(`${BASE_URLS.identity}/chaos`); console.log("16. Triggered Identity Provider /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.order}/chaos`); console.log("17. Triggered Order Gateway /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.stock}/chaos`); console.log("18. Triggered Stock Service /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.kitchen}/chaos`); console.log("19. Triggered Kitchen Queue /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.notification}/chaos`); console.log("20. Triggered Notification Hub /chaos (POST)"); } catch (e) { }
+
+    console.log("\nThe 5 services have now successfully crashed as intended! Your servers will need to be restarted.");
+}
+
+main().catch(console.error);
+</file>
+
+<file path="load-tests/load-test.js">
+const autocannon = require('autocannon');
+const axios = require('axios');
+
+const BASE_URLS = {
+    identity: 'http://localhost:3001',
+    stock: 'http://localhost:3002',
+    order: 'http://localhost:3003',
+    kitchen: 'http://localhost:3004',
+    notification: 'http://localhost:3005'
+};
+
+const results = [];
+
+async function runTest(name, config) {
+    return new Promise((resolve) => {
+        console.log(`\nStarting load test: ${name}`);
+        const instance = autocannon(config, (err, result) => {
+            if (err) {
+                console.error(`Error in ${name}:`, err);
+                return resolve();
+            }
+            console.log(`Finished ${name}. Reqs/s: ${result.requests.average}, Avg Latency: ${result.latency.average}ms, Errors: ${result.errors}`);
+            results.push({ name, result });
+            resolve();
+        });
+        // autocannon.track(instance, { renderProgressBar: false });
+    });
+}
+
+async function main() {
+    console.log("Warming up services...");
+    try { await axios.get(`${BASE_URLS.identity}/health`); } catch (e) { }
+
+    // 1. Test Health Routes
+    await runTest('Identity Provider Health', {
+        url: `${BASE_URLS.identity}/health`,
+        connections: 10,
+        duration: 5,
+    });
+
+    await runTest('Order Gateway Health', {
+        url: `${BASE_URLS.order}/health`,
+        connections: 10,
+        duration: 5,
+    });
+
+    // Get token for order gateway BEFORE we rate limit the login route!
+    let token = '';
+    try {
+        const res = await axios.post(`${BASE_URLS.identity}/login`, { studentId: 'user123', password: 'password' });
+        token = res.data.token;
+    } catch (e) {
+        console.log("Could not obtain token for order gateway test.", e.message);
+    }
+
+    // 2. Test Login Route
+    await runTest('Identity Provider Login', {
+        url: `${BASE_URLS.identity}/login`,
+        connections: 10,
+        duration: 5,
+        method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ studentId: 'user123', password: 'password' })
+    });
+
+    if (token) {
+        // 3. Test Order Gateway Route
+        await runTest('Order Gateway - Create Order', {
+            url: `${BASE_URLS.order}/order`,
+            connections: 10,
+            duration: 5,
+            method: 'POST',
+            headers: {
+                'Content-type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            requests: [
+                {
+                    method: 'POST',
+                    body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey: `load-test-${Date.now()}` })
+                }
+            ]
+        });
+    }
+
+    console.log("\n==================== SUMMARY ====================");
+    for (const r of results) {
+        console.log(`${r.name.padEnd(30)} => Avg: ${Math.round(r.result.requests.average)} req/s | Latency: ${Math.round(r.result.latency.average)}ms | Errors: ${r.result.errors}`);
+    }
+}
+
+main().catch(console.error);
+</file>
+
+<file path="load-tests/package.json">
+{
+  "name": "load-tests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "autocannon": "^8.0.0",
+    "axios": "^1.13.5"
+  }
+}
+</file>
+
+<file path="nginx/nginx.conf">
+events { worker_connections 1024; }
+
+http {
+    upstream gateway {
+        server order-gateway:3000;
+    }
+
+    upstream identity {
+        server identity-provider:3000;
+    }
+
+    upstream client_ui {
+        server client-ui:80;
+    }
+
+    server {
+        listen 80;
+
+        location /api/auth/ {
+            proxy_pass http://identity/;
+        }
+
+        location /api/order/ {
+            proxy_pass http://gateway/;
+        }
+
+        location / {
+            proxy_pass http://client_ui/;
+        }
+    }
+}
+</file>
+
+<file path="notification-hub/tests/notification.test.js">
+const request = require('supertest');
+
+jest.mock('ioredis', () => {
+    return jest.fn().mockImplementation(() => ({
+        ping: jest.fn().mockResolvedValue('PONG')
+    }));
+});
+
+jest.mock('socket.io', () => {
+    return {
+        Server: jest.fn().mockImplementation(() => {
+            return {
+                on: jest.fn(),
+                to: jest.fn().mockReturnValue({ emit: jest.fn() })
+            };
+        })
+    };
+});
+
+const app = require('../index');
+
+describe('Notification Hub Endpoints Tests', () => {
+    it('should receive notification post correctly', async () => {
+        const res = await request(app)
+            .post('/notify')
+            .send({ orderId: 'ord-1234', studentId: 'user123', status: 'Confirmed' });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.success).toBe(true);
+    });
+
+    it('should reject missing args', async () => {
+        const res = await request(app)
+            .post('/notify')
+            .send({ status: 'Confirmed' }); // Missing studentId
+
+        expect(res.statusCode).toBe(400);
+        expect(res.text).toBe('Missing args');
+    });
+});
+</file>
+
+<file path="notification-hub/Dockerfile">
+# Build Stage
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# Production Stage
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app ./
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+CMD ["node", "index.js"]
+</file>
+
+<file path="notification-hub/index.js">
+const express = require('express');
+const { Server } = require('socket.io');
+const http = require('http');
+const Redis = require('ioredis');
+const cors = require('cors');
+const client = require('prom-client');
+const morgan = require('morgan');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(morgan('dev'));
+
+const PORT = process.env.PORT || 3000;
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: '*' }
+});
+
+const redis = new Redis(process.env.REDIS_URL || 'redis://redis:6379');
+
+// Metrics
+const register = new client.Registry();
+const notificationsSent = new client.Counter({ name: 'notifications_sent_total', help: 'Total notifications sent' });
+register.registerMetric(notificationsSent);
+
+// Manage user socket mapping and missed notification buffer
+const userSockets = {};
+const notificationBuffer = {}; // studentId -> [{ orderId, status, timestamp }]
+
+io.on('connection', (socket) => {
+    const studentId = socket.handshake.query.studentId;
+    if (studentId) {
+        userSockets[studentId] = socket.id;
+
+        // Replay missed notifications
+        if (notificationBuffer[studentId]) {
+            notificationBuffer[studentId].forEach(notif => {
+                io.to(socket.id).emit('orderStatus', { orderId: notif.orderId, status: notif.status });
+            });
+            delete notificationBuffer[studentId];
+        }
+    }
+
+    socket.on('disconnect', () => {
+        if (studentId) {
+            delete userSockets[studentId];
+        }
+    });
+});
+
+app.post('/notify', (req, res) => {
+    const { orderId, studentId, status } = req.body;
+    if (!studentId || !status) return res.status(400).send('Missing args');
+
+    const socketId = userSockets[studentId];
+    if (socketId) {
+        io.to(socketId).emit('orderStatus', { orderId, status });
+        notificationsSent.inc();
+    } else {
+        console.warn(`Student ${studentId} not connected for notification ${status}. Buffering...`);
+        if (!notificationBuffer[studentId]) notificationBuffer[studentId] = [];
+        notificationBuffer[studentId].push({ orderId, status, timestamp: Date.now() });
+        // Optional: limit buffer size per student
+        if (notificationBuffer[studentId].length > 10) notificationBuffer[studentId].shift();
+    }
+
+    res.status(200).json({ success: true });
+});
+
+app.post('/chaos', (req, res) => { res.send('Dying'); setTimeout(() => process.exit(1), 500); });
+
+app.get('/health', async (req, res) => {
+    try {
+        await redis.ping();
+        res.status(200).send('OK');
+    } catch (e) {
+        res.status(503).send('Service Unavailable');
+    }
+});
+
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
+
+if (require.main === module) {
+    server.listen(PORT, () => console.log(`Notification Hub running on port ${PORT}`));
+}
+module.exports = app;
+</file>
+
+<file path="notification-hub/package.json">
+{
+  "name": "notification-hub",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bullmq": "^5.70.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ioredis": "^5.9.3",
+    "morgan": "^1.10.1",
+    "prom-client": "^15.1.3",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2"
+  }
+}
+</file>
+
+<file path="observability-configs/promtail/promtail-config.yml">
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+- job_name: system
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: varlogs
+      __path__: /var/log/*log
+
+- job_name: docker
+  docker_sd_configs:
+    - host: unix:///var/run/docker.sock
+      refresh_interval: 5s
+  relabel_configs:
+    - source_labels: ['__meta_docker_container_name']
+      regex: '/(.*)'
+      target_label: 'container'
+</file>
+
+<file path="order-gateway/tests/order.test.js">
+const request = require('supertest');
+const jwt = require('jsonwebtoken');
+
+jest.mock('ioredis', () => {
+    return jest.fn().mockImplementation(() => ({
+        get: jest.fn().mockResolvedValue('0'), // For Out of Stock test
+        ping: jest.fn().mockResolvedValue('PONG')
+    }));
+});
+jest.mock('axios');
+
+const app = require('../index');
+
+describe('Order Gateway Validation Tests', () => {
+    it('should reject unauthenticated requests with 401', async () => {
+        const res = await request(app).post('/order').send({ itemId: 'iftar_box' });
+        expect(res.statusCode).toBe(401);
+    });
+
+    it('should reject instantly if cache says out of stock', async () => {
+        // Fake JWT Token
+        const token = jwt.sign({ studentId: '123' }, process.env.JWT_SECRET || 'super_secret_jwt_key');
+        const res = await request(app).post('/order')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ itemId: 'iftar_box' });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBe('Out of stock (Cache Reject)');
+    });
+});
+</file>
+
+<file path="order-gateway/Dockerfile">
+# Build Stage
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# Production Stage
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app ./
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+CMD ["node", "index.js"]
+</file>
+
+<file path="order-gateway/index.js">
+const express = require('express');
+const axios = require('axios');
+const jwt = require('jsonwebtoken');
+const Redis = require('ioredis');
+const cors = require('cors');
+const morgan = require('morgan');
+const { v4: uuidv4 } = require('uuid');
+const client = require('prom-client');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(morgan('dev'));
+
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key';
+const PORT = process.env.PORT || 3000;
+const STOCK_SERVICE_URL = process.env.STOCK_SERVICE_URL || 'http://stock-service:3000';
+const KITCHEN_QUEUE_URL = process.env.KITCHEN_QUEUE_URL || 'http://kitchen-queue:3000';
+
+const redis = new Redis(process.env.REDIS_URL || 'redis://redis:6379', { maxRetriesPerRequest: null });
+const { Queue } = require('bullmq');
+const kitchenQueue = new Queue('kitchen', { connection: redis });
+
+// Metrics
+const register = new client.Registry();
+const orderCounter = new client.Counter({ name: 'orders_total', help: 'Total orders processed' });
+const orderFailures = new client.Counter({ name: 'order_failures_total', help: 'Total order failures', labelNames: ['reason'] });
+const responseTime = new client.Histogram({ name: 'gateway_response_time_seconds', help: 'Gateway response time', buckets: [0.1, 0.5, 1, 2, 5] });
+
+register.registerMetric(orderCounter);
+register.registerMetric(orderFailures);
+register.registerMetric(responseTime);
+
+app.use((req, res, next) => {
+    const end = responseTime.startTimer();
+    res.on('finish', () => end());
+    next();
+});
+
+// Middleware: Validate Token
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) return res.sendStatus(401);
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
+        next();
+    });
+}
+
+app.post('/order', authenticateToken, async (req, res) => {
+    const { itemId, quantity = 1, idempotencyKey } = req.body;
+    const orderId = idempotencyKey || uuidv4();
+
+    // 1. High-Speed Cache Stock Check
+    try {
+        const cacheStock = await redis.get(`stock:${itemId}`);
+        if (cacheStock !== null && parseInt(cacheStock, 10) <= 0) {
+            orderFailures.labels('out_of_stock_cache').inc();
+            return res.status(400).json({ error: 'Out of stock (Cache Reject)' });
+        }
+    } catch (e) {
+        console.warn("Cache check failed, proceeding to stock service", e.message);
+    }
+
+    try {
+        // 2. Transact with Stock Service
+        const stockResponse = await axios.post(`${STOCK_SERVICE_URL}/deduct`, {
+            itemId,
+            quantity,
+            orderId, // Used as idempotency key in Stock Service
+        });
+
+        if (stockResponse.status !== 200) {
+            throw new Error('Stock deduction failed');
+        }
+
+        // 3. Push to Kitchen Queue (Real Asynchronous Event)
+        // This ensures the system survives if the Kitchen Service is down.
+        await kitchenQueue.add('cook', {
+            orderId,
+            itemId,
+            quantity,
+            studentId: req.user.studentId
+        });
+
+        orderCounter.inc();
+
+        res.json({
+            message: 'Order accepted and queued',
+            orderId,
+            status: 'Processing',
+            details: 'Order has been placed in the kitchen queue asynchronously.'
+        });
+
+    } catch (error) {
+        orderFailures.labels('service_failure').inc();
+        console.error("Order processing failed:", error.message);
+        const status = error.response ? error.response.status : 500;
+        res.status(status).json({ error: 'Failed to process order', details: error.message });
+    }
+});
+
+app.post('/chaos', (req, res) => { res.send('Dying'); setTimeout(() => process.exit(1), 500); });
+
+app.get('/health', async (req, res) => {
+    try {
+        await redis.ping();
+        res.status(200).send('OK');
+    } catch (e) {
+        res.status(503).send('Service Unavailable');
+    }
+});
+
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
+
+if (require.main === module) {
+    app.listen(PORT, () => console.log(`Order Gateway running on port ${PORT}`));
+}
+module.exports = app;
+</file>
+
+<file path="order-gateway/package.json">
+{
+  "name": "order-gateway",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.13.5",
+    "bullmq": "^5.70.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "ioredis": "^5.9.3",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "prom-client": "^15.1.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2"
+  }
+}
+</file>
+
+<file path="prometheus/prometheus.yml">
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'identity-provider'
+    static_configs:
+      - targets: ['identity-provider:3000']
+
+  - job_name: 'order-gateway'
+    static_configs:
+      - targets: ['order-gateway:3000']
+
+  - job_name: 'stock-service'
+    static_configs:
+      - targets: ['stock-service:3000']
+
+  - job_name: 'kitchen-queue'
+    static_configs:
+      - targets: ['kitchen-queue:3000']
+
+  - job_name: 'notification-hub'
+    static_configs:
+      - targets: ['notification-hub:3000']
+</file>
+
+<file path="scripts/chaos-monkey.js">
+const axios = require('axios');
+
+const services = [
+    'http://localhost:3001', // Identity Provider
+    'http://localhost:3002', // Stock Service
+    'http://localhost:3003', // Order Gateway
+    'http://localhost:3004', // Kitchen Queue
+    'http://localhost:3005'  // Notification Hub
+];
+
+console.log("🐒 Chaos Monkey Started...");
+console.log("I will randomly terminate services to test system resilience.");
+
+async function terminateRandomService() {
+    const randomIndex = Math.floor(Math.random() * services.length);
+    const serviceUrl = services[randomIndex];
+
+    console.log(`💀 Chaos Monkey hitting: ${serviceUrl}/chaos`);
+    try {
+        await axios.post(`${serviceUrl}/chaos`);
+    } catch (err) {
+        console.log(`Service at ${serviceUrl} is already down or unreachable.`);
+    }
+}
+
+// Every 30 seconds, there is a 30% chance of a service failure
+setInterval(() => {
+    if (Math.random() < 0.3) {
+        terminateRandomService();
+    } else {
+        console.log("🛡️ System survived this interval.");
+    }
+}, 30000);
+</file>
+
+<file path="stock-service/tests/stock.test.js">
+const request = require('supertest');
+
+jest.mock('pg', () => {
+    const mClient = {
+        query: jest.fn(),
+        release: jest.fn()
+    };
+    return {
+        Pool: jest.fn(() => ({
+            connect: jest.fn().mockResolvedValue(mClient),
+            query: jest.fn() // Used for check dependency 
+        }))
+    };
+});
+
+jest.mock('ioredis', () => {
+    return jest.fn().mockImplementation(() => ({
+        set: jest.fn(),
+        get: jest.fn(),
+        ping: jest.fn()
+    }));
+});
+
+const { app } = require('../index');
+
+describe('Stock Service Deduction Logic Tests', () => {
+    it('should deduct stock successfully', async () => {
+        const { Pool } = require('pg');
+        const pool = new Pool();
+        const mClient = await pool.connect();
+
+        mClient.query.mockImplementation((q) => {
+            if (q.includes('SELECT order_id FROM processed_orders')) return Promise.resolve({ rows: [] });
+            if (q.includes('SELECT stock, version FROM items')) return Promise.resolve({ rows: [{ stock: 10, version: 1 }] });
+            if (q.includes('UPDATE items SET stock')) return Promise.resolve({ rows: [{ stock: 9 }] });
+            return Promise.resolve({ rows: [] }); // default
+        });
+
+        const res = await request(app).post('/deduct').send({ itemId: 'iftar_box', quantity: 1, orderId: 'test1' });
+        expect(res.statusCode).toBe(200);
+        expect(res.body.status).toBe('Success');
+        expect(res.body.remainingStock).toBe(9);
+    });
+
+    it('should reject if out of stock', async () => {
+        const { Pool } = require('pg');
+        const pool = new Pool();
+        const mClient = await pool.connect();
+
+        mClient.query.mockImplementation((q) => {
+            if (q.includes('SELECT order_id FROM processed_orders')) return Promise.resolve({ rows: [] });
+            if (q.includes('SELECT stock, version FROM items')) return Promise.resolve({ rows: [{ stock: 0, version: 1 }] });
+            return Promise.resolve({ rows: [] }); // default
+        });
+
+        const res = await request(app).post('/deduct').send({ itemId: 'iftar_box', quantity: 1, orderId: 'test2' });
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toBe('Out of stock');
+    });
+});
+</file>
+
+<file path="stock-service/add_deps.sh">
+npm install pg-hstore sequelize
+</file>
+
+<file path="stock-service/Dockerfile">
+# Build Stage
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# Production Stage
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=builder /app ./
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+CMD ["node", "index.js"]
+</file>
+
+<file path="stock-service/package.json">
+{
+  "name": "stock-service",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "ioredis": "^5.9.3",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "pg": "^8.18.0",
+    "prom-client": "^15.1.3"
+  }
+}
+</file>
+
+<file path="terraform/main.tf">
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_security_group" "cafeteria_sg" {
+  name        = "iut_cafeteria_sg"
+  description = "Security group for IUT Cafeteria Microservices"
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "app_server" {
+  ami           = "ami-0c55b159cbfafe1f0" # Amazon Linux 2
+  instance_type = "t3.medium"
+  vpc_security_group_ids = [aws_security_group.cafeteria_sg.id]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              yum update -y
+              amazon-linux-extras install docker -y
+              service docker start
+              usermod -a -G docker ec2-user
+              curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              chmod +x /usr/local/bin/docker-compose
+              EOF
+
+  tags = {
+    Name = "IUTCafeteria-Resilience-Node"
+  }
+}
+
+output "public_ip" {
+  value = aws_instance.app_server.public_ip
+}
+</file>
+
+<file path="terraform/outputs.tf">
+
+</file>
+
+<file path="terraform/variables.tf">
+
+</file>
+
+<file path="README.md">
+# 🌙 The IUT Cafeteria Crisis - Resilient Microservice System
+
+![CI Pipeline](https://github.com/{{GITHUB_USERNAME}}/{{REPO_NAME}}/actions/workflows/ci.yml/badge.svg)
+**Winner of DevSprint 2026**
+
+The IUT Cafeteria Crisis is a distributed, fault-tolerant microservice system designed to handle the legendary Ramadan rush. This project migrates a fragile monolith into a robust architecture that ensures no student's Iftar is left in digital limbo.
+
+## 🚀 The Scenario
+
+As 5:30 PM approaches, hundreds of students hit "Order Now". While the old system choked under database locks and deadlocks, this new architecture breaks the monolith into five specialized services that communicate reliably even under heavy load.
+
+## 🏗 System Architecture
+
+### Architecture Overview
+![Architecture Overview](architectural_overview_diagram.png)
+
+## 🏗 Project Screenshots
+
+### Admin Monitoring Dashboard
+![Admin Dashboard](admin_dashboard_screenshot.png)
+
+### Student Journey & Live Tracker
+![Student UI Status](student_ui_screenshot_status.png)
+
+### Service Metrics & Monitoring (Grafana)
+![Grafana Dashboard](grafana_metrics_screenshot.png)
+
+## 🏗 System Microservices
+
+The system is composed of five core microservices, each containerized and isolated:
+
+1.  **Identity Provider**: The single source of truth for student verification. Issues secure **JWT tokens** and implements **Rate Limiting** (3 attempts/min).
+2.  **Order Gateway**: The primary entry point. Performs **Token Validation** and a **High-Speed Cache Stock Check** (via Redis) to protect the database during peak surges.
+3.  **Stock Service**: Manages inventory with **Optimistic Locking** to ensure transactional integrity and prevent over-selling.
+4.  **Kitchen Queue**: Decouples order acknowledgment (<2s) from cooking time (3-7s) using an **Asynchronous Queue** (BullMQ).
+5.  **Notification Hub**: Real-time updates to students on their order status (e.g., "In Kitchen", "Ready for Pickup").
+
+## 🛠 Core Engineering Features
+
+### A. Security & Resilience
+*   **JWT Handshake**: Secure authentication flow.
+*   **Protected Routes**: Automated 401 Unauthorized rejection for missing/invalid tokens.
+*   **Idempotency Guardians**: Services handle partial failures gracefully using idempotency keys, preventing duplicate stock deductions.
+*   **Fault Tolerance**: If the Notification Hub fails, the order still finishes cooking; nothing gets "stuck".
+
+### B. Performance & Observability
+*   **Redis Caching**: The Gateway rejects orders instantly if the cache reports zero stock, shielding the primary database.
+*   **Health & Metrics**: Every service exposes:
+    *   `/health`: Returns `200 OK` or `503 Service Unavailable` based on dependency status.
+    *   `/metrics`: Prometheus-compatible data tracking orders, failures, and latency.
+*   **Morgan Logging**: Real-time HTTP request logging integrated into all services.
+
+### C. Advanced DevOps Pillars
+*   **Kubernetes Scalability**: System manifests included in `k8s/` implementing **Self-Healing** through liveness and readiness probes.
+*   **Security Scanning (Trivy)**: Integrated into the CI pipeline to scan container images for vulnerabilities before they are built.
+*   **Infrastructure as Code (Terraform)**: Multi-cloud ready configurations in `terraform/` to provision **AWS EC2** nodes with Docker pre-installed.
+*   **Log Aggregation (Loki)**: Centralized logging via **Grafana Loki** and **Promtail** for end-to-end request tracing.
+*   **Unified Reverse Proxy (Nginx)**: An Nginx layer routing all traffic through a single entry point (Port 80).
+*   **CI/CD Pipeline**: GitHub Actions workflow running tests across all 5 services with automated image building.
+
+
+## 🖥 Interfaces
+
+### Student Journey UI
+A sleek SPA for the full student flow:
+1.  **Secure Login** to obtain a token.
+2.  **Order Placement** with real-time feedback.
+3.  **Live Tracker**: Pending → Stock Verified → In Kitchen → Ready.
+
+### Admin Monitoring Dashboard
+A command center for cafeteria administrators:
+*   **Health Grid**: Real-time Green/Red status for all microservices.
+*   **Live Metrics**: Visualizing latency and throughput.
+*   **Chaos Toggle**: A manual trigger to "kill" services and observe system resilience.
+
+### Quick Start (Full Stack with Docker)
+Run the entire ecosystem with a single command. This will spin up all 5 microservices, a Postgres database (pre-seeded with student data and iftar stock), and a Redis instance for caching and async queueing:
+```bash
+docker-compose up --build
+```
+
+### 🎯 Core Resilience Features
+*   **Asynchronous Messaging**: The Order Gateway pushes orders to a **BullMQ** queue in Redis. The Kitchen Queue service consumes them asynchronously. If the Kitchen service fails, orders are NOT lost—they stay safe in the queue until the service recovers.
+*   **Real Data Persistence**: No more memory-only volatile data. Every transaction for auth and stock uses **PostgreSQL** with strict relational integrity.
+*   **Optimistic Locking**: The Stock Service uses SQL-level version checks to handle massive concurrency without data corruption.
+*   **Fail-Fast Cache**: Redis acts as a high-speed shield, rejecting orders instantly if stock is depleted, saving the primary database from overload.
+
+### Local Development (Non-Docker)
+If you wish to run without Docker, ensure you have a local PostgreSQL and Redis instance running and set the environment variables in each service terminal before starting:
+```bash
+npm install
+node index.js
+```
+
+### Load Testing
+To hammer the system and verify it can take the load:
+```bash
+cd load-tests
+node load-test-all.js
+```
+
+---
+*Built with ❤️ for IUT Computer Society - DevSprint 2026*
+</file>
+
+</files>

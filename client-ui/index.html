@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IUT Cafeteria - Student Journey</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>IUT Cafeteria ✨</h1>
+            <div id="user-info" class="hidden">
+                <span id="student-id-display"></span>
+                <button id="logout-btn">Logout</button>
+            </div>
+        </header>
+
+        <main>
+            <!-- Login Section -->
+            <section id="login-section" class="card">
+                <h2>Student Login</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="studentId">Student ID</label>
+                        <input type="text" id="studentId" required placeholder="e.g. user123">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" required placeholder="password">
+                    </div>
+                    <button type="submit" class="btn primary">Login</button>
+                    <div id="login-error" class="error hidden"></div>
+                </form>
+            </section>
+
+            <!-- Order Section -->
+            <section id="order-section" class="card hidden">
+                <h2>Iftar Menu</h2>
+                <div class="menu-item">
+                    <div class="item-info">
+                        <h3>Iftar Box Premium</h3>
+                        <p>Dates, Biryani, Water</p>
+                    </div>
+                    <button id="order-btn" class="btn primary">Order Now</button>
+                </div>
+                <div id="order-error" class="error hidden"></div>
+            </section>
+
+            <!-- Status Tracker -->
+            <section id="status-section" class="card hidden">
+                <h2>Live Order Tracker</h2>
+                <div class="tracker">
+                    <div class="step" id="step-pending">Pending</div>
+                    <div class="step" id="step-verified">Stock Verified</div>
+                    <div class="step" id="step-kitchen">In Kitchen</div>
+                    <div class="step" id="step-ready">Ready</div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

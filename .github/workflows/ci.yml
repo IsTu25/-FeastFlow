@@ -1,0 +1,67 @@
+name: IUT Cafeteria CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test_services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [identity-provider, order-gateway, stock-service, kitchen-queue, notification-hub]
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+          cache-dependency-path: './${{ matrix.service }}/package-lock.json'
+          
+      - name: Install dependencies
+        working-directory: ./${{ matrix.service }}
+        run: npm ci || npm install
+        
+      - name: Run Unit Tests
+        working-directory: ./${{ matrix.service }}
+        run: npm test
+
+  build_images:
+    needs: test_services
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service: [identity-provider, order-gateway, stock-service, kitchen-queue, notification-hub]
+        
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./${{ matrix.service }}
+          push: false
+          tags: iut-cafeteria/${{ matrix.service }}:latest
+          load: true # Load image for scanning
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'iut-cafeteria/${{ matrix.service }}:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+

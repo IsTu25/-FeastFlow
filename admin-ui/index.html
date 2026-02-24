@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - System Health</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 2rem;
+        }
+
+        h1 {
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+
+        .service-name {
+            font-weight: bold;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .healthy {
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+
+        .down {
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+        }
+
+        .metrics {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        .chaostoggle {
+            margin-top: 15px;
+            width: 100%;
+            background: #b91c1c;
+            border: none;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .chaostoggle:hover {
+            background: #991b1b;
+        }
+
+        #global-metrics {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            background: #1e293b;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .metric-big {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: #38bdf8;
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            color: #cbd5e1;
+        }
+
+        #latency-alert {
+            display: none;
+            background: #ef4444;
+            color: white;
+            font-weight: bold;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>System Observability Dashboard</h1>
+
+    <div id="latency-alert">⚠️ HIGH LATENCY ALERT: Gateway average response time has exceeded 1 second!</div>
+
+    <div id="global-metrics">
+        <div>
+            <div class="metric-big" id="total-orders">0</div>
+            <div class="metric-label">Total Orders Processed</div>
+        </div>
+        <div>
+            <div class="metric-big" id="avg-latency">-</div>
+            <div class="metric-label">Avg Gateway Latency (s)</div>
+        </div>
+        <div>
+            <div class="metric-big" id="kitchen-backlog">0</div>
+            <div class="metric-label">Kitchen Processed</div>
+        </div>
+    </div>
+
+    <div class="grid" id="services-grid">
+        <!-- populated via js -->
+    </div>
+
+    <script>
+        const services = [
+            { name: "Identity Provider", url: "http://localhost:3001", hasChaos: true },
+            { name: "Order Gateway", url: "http://localhost:3003", hasChaos: true },
+            { name: "Stock Service", url: "http://localhost:3002", hasChaos: true },
+            { name: "Kitchen Queue", url: "http://localhost:3004", hasChaos: true },
+            { name: "Notification Hub", url: "http://localhost:3005", hasChaos: true }
+        ];
+
+        let latencyHistory = []; // Stores { timestamp, sum, count } for Order Gateway
+
+        const grid = document.getElementById('services-grid');
+
+        // Render cards
+        services.forEach((s, i) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="service-name"><span class="status-indicator down" id="status-${i}"></span>${s.name}</div>
+                <div class="metrics" id="metrics-${i}">Metrics loading...</div>
+                ${s.hasChaos ? `<button class="chaostoggle" onclick="killService('${s.url}')">💀 Kill Service (Chaos)</button>` : ''}
+            `;
+            grid.appendChild(card);
+        });
+
+        async function killService(url) {
+            try { await fetch(`${url}/chaos`, { method: 'POST' }); } catch (e) { }
+        }
+
+        async function poll() {
+            for (let i = 0; i < services.length; i++) {
+                const s = services[i];
+                try {
+                    const res = await fetch(`${s.url}/health`);
+                    const indicator = document.getElementById(`status-${i}`);
+                    if (res.ok) {
+                        indicator.className = 'status-indicator healthy';
+                        fetchMetrics(s.url, i, s.name);
+                    } else {
+                        throw new Error();
+                    }
+                } catch (e) {
+                    document.getElementById(`status-${i}`).className = 'status-indicator down';
+                    document.getElementById(`metrics-${i}`).innerText = "Service Unreachable";
+                }
+            }
+        }
+
+        async function fetchMetrics(url, i, name) {
+            try {
+                const res = await fetch(`${url}/metrics`);
+                const text = await res.text();
+
+                let metricsHtml = "";
+
+                if (name === "Order Gateway") {
+                    const totalMatch = text.match(/orders_total (\d+)/);
+                    if (totalMatch) {
+                        metricsHtml += `Orders: ${totalMatch[1]}<br>`;
+                        document.getElementById('total-orders').innerText = totalMatch[1];
+                    }
+                    const latencySum = text.match(/gateway_response_time_seconds_sum ([\d.]+)/);
+                    const latencyCount = text.match(/gateway_response_time_seconds_count (\d+)/);
+
+                    if (latencySum && latencyCount) {
+                        const now = Date.now();
+                        const currentSum = parseFloat(latencySum[1]);
+                        const currentCount = parseInt(latencyCount[1]);
+
+                        latencyHistory.push({ timestamp: now, sum: currentSum, count: currentCount });
+                        const thirtySecondsAgo = now - 30000;
+                        latencyHistory = latencyHistory.filter(h => h.timestamp > thirtySecondsAgo);
+
+                        let displayAvg = (currentSum / currentCount).toFixed(3);
+
+                        if (latencyHistory.length > 1) {
+                            const first = latencyHistory[0];
+                            const last = latencyHistory[latencyHistory.length - 1];
+                            const deltaSum = last.sum - first.sum;
+                            const deltaCount = last.count - first.count;
+
+                            if (deltaCount > 0) {
+                                displayAvg = (deltaSum / deltaCount).toFixed(3);
+                            }
+                        }
+
+                        document.getElementById('avg-latency').innerText = displayAvg;
+                        metricsHtml += `Latency (30s): ${displayAvg}s <br>`;
+
+                        if (parseFloat(displayAvg) > 1.0) {
+                            document.getElementById('avg-latency').style.color = '#ef4444';
+                            document.getElementById('latency-alert').style.display = 'block';
+                        } else {
+                            document.getElementById('avg-latency').style.color = '#38bdf8';
+                            document.getElementById('latency-alert').style.display = 'none';
+                        }
+                    }
+                } else if (name === "Kitchen Queue") {
+                    const procMatch = text.match(/kitchen_processed_total (\d+)/);
+                    if (procMatch) {
+                        metricsHtml += `Processed: ${procMatch[1]}<br>`;
+                        document.getElementById('kitchen-backlog').innerText = procMatch[1];
+                    }
+                } else if (name === "Identity Provider") {
+                    const loginMatch = text.match(/login_total (\d+)/);
+                    if (loginMatch) metricsHtml += `Logins: ${loginMatch[1]}<br>`;
+                }
+
+                document.getElementById(`metrics-${i}`).innerHTML = metricsHtml || "Healthy";
+            } catch (e) { }
+        }
+
+        setInterval(poll, 2000);
+        poll();
+    </script>
+</body>
+
+</html>

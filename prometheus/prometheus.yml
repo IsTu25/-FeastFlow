@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'identity-provider'
+    static_configs:
+      - targets: ['identity-provider:3000']
+
+  - job_name: 'order-gateway'
+    static_configs:
+      - targets: ['order-gateway:3000']
+
+  - job_name: 'stock-service'
+    static_configs:
+      - targets: ['stock-service:3000']
+
+  - job_name: 'kitchen-queue'
+    static_configs:
+      - targets: ['kitchen-queue:3000']
+
+  - job_name: 'notification-hub'
+    static_configs:
+      - targets: ['notification-hub:3000']
