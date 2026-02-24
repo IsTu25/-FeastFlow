@@ -11,7 +11,7 @@
         >> DevSprint 2026 | IUT Computer Society <<
 ```
 
-[![CI Pipeline](https://img.shields.io/github/actions/workflow/status/IsTu25/-FeastFlow/ci.yml?branch=main&style=for-the-badge&logo=github-actions&label=CI%20Pipeline)](https://github.com/IsTu25/-FeastFlow/actions)
+[![CI Pipeline](https://github.com/IsTu25/-FeastFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/IsTu25/-FeastFlow/actions)
 [![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
