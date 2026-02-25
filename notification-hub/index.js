@@ -3,8 +3,11 @@ const { Server } = require('socket.io');
 const http = require('http');
 const Redis = require('ioredis');
 const cors = require('cors');
-const client = require('prom-client');
 const morgan = require('morgan');
+
+const metrics = require('./utils/metrics');
+const NotificationService = require('./services/notificationService');
+const NotificationController = require('./controllers/notificationController');
 
 const app = express();
 app.use(cors());
@@ -13,60 +16,18 @@ app.use(morgan('dev'));
 
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: '*' }
-});
-
+const io = new Server(server, { cors: { origin: '*' } });
 const redis = new Redis(process.env.REDIS_URL || 'redis://redis:6379');
 
-// Metrics
-const register = new client.Registry();
-const notificationsSent = new client.Counter({ name: 'notifications_sent_total', help: 'Total notifications sent' });
-register.registerMetric(notificationsSent);
+// Dependency Injection
+const notificationService = new NotificationService(io, metrics);
+const notificationController = new NotificationController(notificationService);
 
-// Manage user socket mapping and missed notification buffer
-const userSockets = {};
-const notificationBuffer = {}; // studentId -> [{ orderId, status, timestamp }]
+// Socket Handlers
+io.on('connection', (socket) => notificationService.handleConnection(socket));
 
-io.on('connection', (socket) => {
-    const studentId = socket.handshake.query.studentId;
-    if (studentId) {
-        userSockets[studentId] = socket.id;
-
-        // Replay missed notifications
-        if (notificationBuffer[studentId]) {
-            notificationBuffer[studentId].forEach(notif => {
-                io.to(socket.id).emit('orderStatus', { orderId: notif.orderId, status: notif.status });
-            });
-            delete notificationBuffer[studentId];
-        }
-    }
-
-    socket.on('disconnect', () => {
-        if (studentId) {
-            delete userSockets[studentId];
-        }
-    });
-});
-
-app.post('/notify', (req, res) => {
-    const { orderId, studentId, status } = req.body;
-    if (!studentId || !status) return res.status(400).send('Missing args');
-
-    const socketId = userSockets[studentId];
-    if (socketId) {
-        io.to(socketId).emit('orderStatus', { orderId, status });
-        notificationsSent.inc();
-    } else {
-        console.warn(`Student ${studentId} not connected for notification ${status}. Buffering...`);
-        if (!notificationBuffer[studentId]) notificationBuffer[studentId] = [];
-        notificationBuffer[studentId].push({ orderId, status, timestamp: Date.now() });
-        // Optional: limit buffer size per student
-        if (notificationBuffer[studentId].length > 10) notificationBuffer[studentId].shift();
-    }
-
-    res.status(200).json({ success: true });
-});
+// Routes
+app.post('/notify', (req, res) => notificationController.notify(req, res));
 
 app.post('/chaos', (req, res) => { res.send('Dying'); setTimeout(() => process.exit(1), 500); });
 
@@ -80,8 +41,8 @@ app.get('/health', async (req, res) => {
 });
 
 app.get('/metrics', async (req, res) => {
-    res.set('Content-Type', register.contentType);
-    res.end(await register.metrics());
+    res.set('Content-Type', metrics.register.contentType);
+    res.end(await metrics.register.metrics());
 });
 
 if (require.main === module) {
