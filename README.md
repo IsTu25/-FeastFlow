@@ -4,6 +4,9 @@ FeastFlow is a high-performance, fault-tolerant microservices platform designed 
 
 Built for the **FeastFlow DevSprint 2026 Competition**, this project provides a robust solution for managing large-scale iftar meal distributions with real-time tracking and automated failovers.
 
+### Project Overview & Dashboard
+<img src="docs/assets/dashboard_ui.png" alt="FeastFlow Dashboard UI" width="100%" />
+
 ---
 
 ## 🏗 System Architecture
