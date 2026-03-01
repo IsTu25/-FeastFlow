@@ -1,0 +1,47 @@
+groups:
+- name: FeastFlowAlerts
+  rules:
+  - alert: HighOrderFailureRate
+    expr: rate(order_failures_total[5m]) / (rate(orders_total[5m]) + 0.0001) > 0.05
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High order failure rate detected"
+      description: "Over 5% of orders are failing in the last 5 minutes."
+
+  - alert: LowOrderSuccessRate
+    expr: order_success_rate_percentage < 95
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Business KPI: Low Order Success Rate"
+      description: "Order success rate fell below 95% (Current: {{ $value }}%)"
+
+  - alert: HighP99Latency
+    expr: histogram_quantile(0.99, rate(gateway_response_time_seconds_bucket[5m])) > 1
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Performance SLO: High P99 Latency"
+      description: "Gateway P99 latency is over 1 second (Current: {{ $value }}s)"
+
+  - alert: StockServiceHealthy
+    expr: up{job="stock-service"} == 0
+    for: 30s
+    labels:
+      severity: blocker
+    annotations:
+      summary: "Stock Service is DOWN"
+      description: "Critical service 'stock-service' is unreachable."
+
+  - alert: CircuitBreakerOpen
+    expr: circuit_breaker_state == 1
+    for: 10s
+    labels:
+      severity: critical
+    annotations:
+      summary: "Circuit Breaker OPEN for {{ $labels.service }}"
+      description: "The circuit breaker for {{ $labels.service }} has tripped due to high error rates."

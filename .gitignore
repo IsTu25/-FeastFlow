@@ -11,3 +11,4 @@ prometheus/data/
 loki/data/
 terraform/.terraform/
 terraform/*.tfstate*
+repomix-output.xml

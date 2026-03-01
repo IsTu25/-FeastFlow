@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-02-27T14:29:48Z",
+  "target": "http://localhost",
+  "concurrency": 20,
+  "total": 20,
+  "success": 6,
+  "failed": 14,
+  "slowResponses": 6,
+  "avgResponseTimeMs": 657,
+  "maxResponseTimeMs": 1027,
+  "successRate": "30.0%"
+}

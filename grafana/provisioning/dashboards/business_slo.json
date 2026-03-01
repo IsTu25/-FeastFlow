@@ -1,0 +1,265 @@
+{
+    "title": "FeastFlow \u2014 Business SLOs",
+    "style": "dark",
+    "refresh": "5s",
+    "refresh_intervals": [
+        "5s",
+        "10s",
+        "30s"
+    ],
+    "time": {
+        "from": "now-30m",
+        "to": "now"
+    },
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "uid": "business-slos",
+    "panels": [
+        {
+            "type": "row",
+            "id": 1,
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 24,
+                "h": 1
+            },
+            "title": "Business Performance Indicators"
+        },
+        {
+            "type": "gauge",
+            "id": 2,
+            "gridPos": {
+                "x": 0,
+                "y": 1,
+                "w": 8,
+                "h": 8
+            },
+            "title": "Order Success Rate (Target: 99%)",
+            "targets": [
+                {
+                    "expr": "sum(rate(orders_total{status=\"success\"}[5m])) / sum(rate(orders_total[5m])) * 100",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 95
+                            },
+                            {
+                                "color": "green",
+                                "value": 99
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "gauge",
+            "id": 3,
+            "gridPos": {
+                "x": 8,
+                "y": 1,
+                "w": 8,
+                "h": 8
+            },
+            "title": "Bulkhead Saturation (Stock)",
+            "targets": [
+                {
+                    "expr": "gateway_bulkhead_active_requests{service=\"stock-service\"}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "min": 0,
+                    "max": 10,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 5
+                            },
+                            {
+                                "color": "red",
+                                "value": 8
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "row",
+            "id": 4,
+            "gridPos": {
+                "x": 0,
+                "y": 9,
+                "w": 24,
+                "h": 1
+            },
+            "title": "SLO Tracking (Latency)"
+        },
+        {
+            "type": "timeseries",
+            "id": 5,
+            "gridPos": {
+                "x": 0,
+                "y": 10,
+                "w": 12,
+                "h": 8
+            },
+            "title": "Response Time Percentiles (Gateway)",
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(gateway_response_time_seconds_bucket[5m])))",
+                    "legendFormat": "P95 Actual",
+                    "refId": "A"
+                },
+                {
+                    "expr": "histogram_quantile(0.99, sum by (le) (rate(gateway_response_time_seconds_bucket[5m])))",
+                    "legendFormat": "P99 Actual",
+                    "refId": "B"
+                },
+                {
+                    "expr": "histogram_quantile(0.50, sum by (le) (rate(gateway_response_time_seconds_bucket[5m])))",
+                    "legendFormat": "P50 Actual",
+                    "refId": "C"
+                },
+                {
+                    "expr": "0.5",
+                    "legendFormat": "P95 SLO Target (500ms)",
+                    "refId": "D"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineInterpolation": "smooth"
+                    }
+                }
+            }
+        },
+        {
+            "type": "gauge",
+            "id": 6,
+            "gridPos": {
+                "x": 12,
+                "y": 10,
+                "w": 12,
+                "h": 8
+            },
+            "title": "Cache Hit Rate (Stock Service)",
+            "targets": [
+                {
+                    "expr": "sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m]))) * 100",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 80
+                            },
+                            {
+                                "color": "green",
+                                "value": 95
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "type": "row",
+            "id": 7,
+            "gridPos": {
+                "x": 0,
+                "y": 18,
+                "w": 24,
+                "h": 1
+            },
+            "title": "Efficiency Metrics"
+        },
+        {
+            "type": "stat",
+            "id": 8,
+            "gridPos": {
+                "x": 0,
+                "y": 19,
+                "w": 12,
+                "h": 5
+            },
+            "title": "Kitchen Efficiency (Orders/min)",
+            "targets": [
+                {
+                    "expr": "kitchen_efficiency_per_minute",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short",
+                    "color": {
+                        "mode": "continuous-GrYlRd"
+                    }
+                }
+            }
+        },
+        {
+            "type": "stat",
+            "id": 9,
+            "gridPos": {
+                "x": 12,
+                "y": 19,
+                "w": 12,
+                "h": 5
+            },
+            "title": "Inventory Accuracy",
+            "targets": [
+                {
+                    "expr": "inventory_accuracy_percentage",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100
+                }
+            }
+        }
+    ]
+}

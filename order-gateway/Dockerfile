@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
+RUN npm run build
 
 # Production Stage
 FROM node:18-alpine
@@ -12,4 +13,4 @@ COPY --from=builder /app ./
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
-CMD ["node", "index.js"]
+CMD ["node", "dist/index.js"]

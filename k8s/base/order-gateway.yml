@@ -25,20 +25,36 @@ spec:
         - name: STOCK_SERVICE_URL
           value: "http://stock-service:3000"
         - name: REDIS_URL
-          value: "redis://redis-svc:6379"
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: REDIS_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: JWT_SECRET
         livenessProbe:
           httpGet:
             path: /health
             port: 3000
           initialDelaySeconds: 10
           periodSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
         resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
           requests:
+            memory: "128Mi"
             cpu: "100m"
+          limits:
             memory: "256Mi"
+            cpu: "500m"
 ---
 apiVersion: v1
 kind: Service

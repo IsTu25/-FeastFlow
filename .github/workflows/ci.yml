@@ -51,7 +51,7 @@ jobs:
           context: ./${{ matrix.service }}
           push: false
           tags: iut-cafeteria/${{ matrix.service }}:latest
-          load: true # Load image for scanning
+          load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -65,3 +65,74 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
+  integration_load_test:
+    needs: test_services
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "⏳ Waiting for services (max 120s)..."
+          for i in {1..40}; do
+            if curl -s http://localhost/api/auth/health && \
+               curl -s http://localhost/api/order/health && \
+               curl -s http://localhost/api/stock/health && \
+               curl -s http://localhost/api/kitchen/health; then
+              echo "✅ All services healthy!"
+              exit 0
+            fi
+            echo "  ⏳ Waiting..."
+            sleep 3
+          done
+          echo "❌ Timed out waiting for healthy services"
+          docker compose logs --tail=50
+          exit 1
+
+      - name: Run load test
+        env:
+          ORDER_URL: http://localhost
+        run: bash scripts/load-test.sh
+
+      - name: Upload load test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: load-test-results.json
+          retention-days: 7
+
+      - name: Generate Summary and Check Success Rate
+        run: |
+          TOTAL=$(jq -r '.total' load-test-results.json)
+          SUCCESS=$(jq -r '.success' load-test-results.json)
+          FAILED=$(jq -r '.failed' load-test-results.json)
+          SLOW=$(jq -r '.slowResponses' load-test-results.json)
+          AVG=$(jq -r '.avgResponseTimeMs' load-test-results.json)
+          RATE=$(jq -r '.successRate' load-test-results.json | sed 's/%//')
+          
+          echo "## 🌙 Load Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Requests | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Successful | $SUCCESS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Slow (>1000ms) | $SLOW |" >> $GITHUB_STEP_SUMMARY
+          echo "| Avg Response Time | ${AVG}ms |" >> $GITHUB_STEP_SUMMARY
+          echo "| Success Rate % | ${RATE}% |" >> $GITHUB_STEP_SUMMARY
+
+          if (( $(echo "$RATE < 80" | bc -l) )); then
+            echo "❌ Success rate ($RATE%) is below 80% threshold!"
+            exit 1
+          fi
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v

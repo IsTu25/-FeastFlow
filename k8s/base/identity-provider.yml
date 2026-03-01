@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity-provider
+  labels:
+    app: identity-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: identity-provider
+  template:
+    metadata:
+      labels:
+        app: identity-provider
+    spec:
+      containers:
+      - name: identity-provider
+        image: iut-cafeteria/identity-provider:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        - name: DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: DB_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: REDIS_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: JWT_SECRET
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-provider
+spec:
+  selector:
+    app: identity-provider
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000

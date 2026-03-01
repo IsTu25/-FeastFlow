@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stock-service
+  labels:
+    app: stock-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stock-service
+  template:
+    metadata:
+      labels:
+        app: stock-service
+    spec:
+      containers:
+      - name: stock-service
+        image: iut-cafeteria/stock-service:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        - name: DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: DB_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: feastflow-secrets
+              key: REDIS_URL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stock-service
+spec:
+  selector:
+    app: stock-service
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
