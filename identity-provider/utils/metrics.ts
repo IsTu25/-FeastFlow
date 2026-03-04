@@ -17,11 +17,19 @@ export const requestDuration = new client.Histogram({
     buckets: [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5]
 });
 
+export const rateLimitHits = new client.Counter({
+    name: 'rate_limit_hits_total',
+    help: 'Total rate limit rejections',
+    labelNames: ['endpoint', 'student_id']
+});
+
 register.registerMetric(loginTotal);
 register.registerMetric(requestDuration);
+register.registerMetric(rateLimitHits);
 
 export default {
     register,
     loginTotal,
-    requestDuration
+    requestDuration,
+    rateLimitHits
 };

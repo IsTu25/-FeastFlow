@@ -54,7 +54,7 @@ app.use((req, res, next) => {
 });
 
 // Routes
-app.use('/', getAuthRoutes(authController));
+app.use('/', getAuthRoutes(authController, redis));
 
 // Explicit debug route
 app.post('/login-direct', (req, res) => {

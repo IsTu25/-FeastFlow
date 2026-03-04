@@ -23,7 +23,7 @@ The project follows a layered microservices architecture, meticulously orchestra
 
 ## ⚡ Core Microservices
 
-1.  **Identity Provider (Auth)**: Secure JWT-based authentication service.
+1.  **Identity Provider (Auth)**: Secure JWT-based authentication service with **distributed rate limiting** (3 attempts/min per Student ID) to prevent brute-force attacks.
 2.  **Order Gateway (Orchestrator)**: The central brain implementing the **Saga Pattern**. It manages the lifecycle of an order from stock deduction to kitchen queueing.
 3.  **Stock Service (Inventory)**: High-performance inventory management featuring a **Redis Hot-Cache** with a guaranteed **95%+ Cache Hit Rate**.
 4.  **Kitchen Queue (Worker)**: Asynchronous order processing using BullMQ with high-concurrency workers.
@@ -48,6 +48,11 @@ FeastFlow is designed to be "unkillable," handling partial system failures witho
 *   **Cache Warming**: On startup, a Redis pipeline pre-loads the entire inventory.
 *   **Upsert-on-Commit**: When stock changes, the cache is instantly updated rather than invalidated, maintaining a professional **100% Hit Rate** even under high load.
 *   **Background Re-sync**: A periodic 60-second heartbeat ensures the cache never stays stale.
+
+### 4. Security: Brute-Force & Bot Protection
+*   **Distributed Rate Limiting**: The Identity Provider uses **Redis-backed rate limiting** to enforce a strict **3 login attempts per minute** policy per Student ID.
+*   **429 Too Many Requests**: Automated blocking of suspicious activity with clear `retry-after` headers to protect the system during high-traffic "Ramadan Rush" periods.
+*   **Monitoring Rejections**: Real-time tracking of rate-limit hits in Grafana to identify and mitigate botting attempts.
 
 ---
 
@@ -96,3 +101,4 @@ docker-compose up -d --build
 1.  **Normal Flow**: Place an order from the React Dashboard. Verify trace in Jaeger.
 2.  **Gremlin (Latency)**: Inject artificial delays into the Stock Service. Observe the **Circuit Breaker** opening (turning Red) on the dashboard.
 3.  **Kill a Service**: Stop the `kitchen-queue` container. Notice how orders remain `STOCKED` until the service restarts, at which point the worker resumes processing from where it left off.
+4.  **Brute Force Simulation**: Attempt to login 4 times with an incorrect password. Observe the **429 Too Many Requests** error and wait 60 seconds for the cooldown.

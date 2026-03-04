@@ -21,9 +21,11 @@ jest.mock('pg', () => {
 
 jest.mock('ioredis', () => {
     return jest.fn().mockImplementation(() => ({
-        set: jest.fn(),
-        ping: jest.fn(),
-        on: jest.fn()
+        set: jest.fn().mockResolvedValue('OK'),
+        get: jest.fn().mockResolvedValue(null),
+        ping: jest.fn().mockResolvedValue('PONG'),
+        on: jest.fn(),
+        call: jest.fn().mockResolvedValue(1), // Mock result for redis commands
     }));
 });
 
@@ -45,5 +47,22 @@ describe('Identity Provider Tests', () => {
 
         expect(res.statusCode).toBe(400);
         expect(res.body.error).toBe('Missing credentials');
+    });
+
+    it('should rate limit after 3 attempts', async () => {
+        // Attempt 1
+        await request(app).post('/login').send({ studentId: 'ratelimit', password: 'wrong' });
+        // Attempt 2
+        await request(app).post('/login').send({ studentId: 'ratelimit', password: 'wrong' });
+        // Attempt 3
+        await request(app).post('/login').send({ studentId: 'ratelimit', password: 'wrong' });
+
+        // Attempt 4 should be rated limited
+        const res = await request(app)
+            .post('/login')
+            .send({ studentId: 'ratelimit', password: 'wrong' });
+
+        expect(res.statusCode).toBe(429);
+        expect(res.body.error).toBe('Too many login attempts');
     });
 });

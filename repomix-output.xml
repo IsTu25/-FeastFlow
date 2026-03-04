@@ -43,7 +43,17 @@ The content is organized as follows:
 .github/
   workflows/
     ci.yml
+    main.yml
+deploy/
+  docker-compose.prod.yml
 docs/
+  assets/
+    dashboard_ui.png
+    full_architecture.png
+    grafana_business_slo.png
+    grafana_command_center.png
+    jaeger_tracing.png
+    layered_architecture.png
   architecture.png
   dashboard.png
   grafana_dashboard.png
@@ -207,6 +217,233 @@ token.txt
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path=".github/workflows/main.yml">
+name: 🚀 FeastFlow Cloud Deployment
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: 🏗️ Build & Verify Services
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🛠️ Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🏗️ Build All Microservices (Cacheable)
+        run: |
+          docker compose build --parallel --no-cache
+
+      - name: 🧪 Unit Test Validation
+        run: |
+          # Example for one service (you can add others)
+          docker compose run --rm stock-service npm test
+
+  push-to-registry:
+    name: 📤 Push to GitHub Container Registry
+    needs: build-and-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Build & Push (Stock Service)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./stock-service
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/stock-service:latest
+
+      - name: 🏷️ Build & Push (Order Gateway)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./order-gateway
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/order-gateway:latest
+
+      - name: 🏷️ Build & Push (Kitchen Queue)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./kitchen-queue
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kitchen-queue:latest
+
+  # 🚀 AUTOMATIC DEPLOYMENT (OPTIONAL)
+  # Uncomment after setting up your VPS and SSH secrets in GitHub Settings
+  # deploy-to-vps:
+  #   name: 🌐 Deploy to VPS
+  #   needs: push-to-registry
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: 🌐 SSH and Pull Latest
+  #       uses: appleboy/ssh-action@v1.0.3
+  #       with:
+  #         host: ${{ secrets.VPS_IP }}
+  #         username: ${{ secrets.VPS_USER }}
+  #         key: ${{ secrets.VPS_SSH_KEY }}
+  #         script: |
+  #           cd ~/feastflow
+  #           git pull origin main
+  #           docker compose pull
+  #           docker compose up -d
+</file>
+
+<file path="deploy/docker-compose.prod.yml">
+services:
+  # In Prod, we might use a Managed Redis (AWS ElastiCache), 
+  # but Docker is fine for high-performance demos.
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-iut_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-iut_password}
+      POSTGRES_DB: iut_cafeteria
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  identity-provider:
+    image: ghcr.io/${GH_USER:-istu25}/identity-provider:latest
+    restart: always
+    environment:
+      - PORT=3000
+      - DB_URL=postgresql://${DB_USER:-iut_user}:${DB_PASSWORD:-iut_password}@postgres:5432/iut_cafeteria
+      - JWT_SECRET=${JWT_SECRET:-super_secret_jwt_key}
+      - REDIS_URL=redis://redis:6379
+      - SERVICE_NAME=identity-provider
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      - postgres
+      - redis
+
+  stock-service:
+    image: ghcr.io/${GH_USER:-istu25}/stock-service:latest
+    restart: always
+    environment:
+      - PORT=3000
+      - DB_URL=postgresql://${DB_USER:-iut_user}:${DB_PASSWORD:-iut_password}@postgres:5432/iut_cafeteria
+      - REDIS_URL=redis://redis:6379
+      - SERVICE_NAME=stock-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      - postgres
+      - redis
+
+  order-gateway:
+    image: ghcr.io/${GH_USER:-istu25}/order-gateway:latest
+    restart: always
+    environment:
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-super_secret_jwt_key}
+      - REDIS_URL=redis://redis:6379
+      - STOCK_SERVICE_URL=http://stock-service:3000
+      - KITCHEN_QUEUE_URL=http://kitchen-queue:3000
+      - NOTIFICATION_HUB_URL=http://notification-hub:3000
+      - SERVICE_NAME=order-gateway
+      - DB_URL=postgresql://${DB_USER:-iut_user}:${DB_PASSWORD:-iut_password}@postgres:5432/iut_cafeteria
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      - stock-service
+      - kitchen-queue
+      - redis
+
+  kitchen-queue:
+    image: ghcr.io/${GH_USER:-istu25}/kitchen-queue:latest
+    restart: always
+    environment:
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - NOTIFICATION_HUB_URL=http://notification-hub:3000
+      - SERVICE_NAME=kitchen-queue
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      - redis
+      - notification-hub
+
+  notification-hub:
+    image: ghcr.io/${GH_USER:-istu25}/notification-hub:latest
+    restart: always
+    environment:
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - SERVICE_NAME=notification-hub
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    depends_on:
+      - redis
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - order-gateway
+      - identity-provider
+
+  # OBSERVABILITY STACK (High Memory Usage - Optional for low-tier VPS)
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3006:3000"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: always
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+volumes:
+  pgdata:
+  redisdata:
+</file>
 
 <file path="grafana/provisioning/dashboards/business_slo.json">
 {
@@ -474,6 +711,36 @@ This section contains the contents of the repository's files.
         }
     ]
 }
+</file>
+
+<file path="grafana/provisioning/dashboards/provider.yml">
+apiVersion: 1
+
+providers:
+  - name: 'Standard Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+</file>
+
+<file path="grafana/provisioning/datasources/datasource.yml">
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
 </file>
 
 <file path="identity-provider/controllers/authController.ts">
@@ -1670,6 +1937,237 @@ runLoadTest().catch((err) => {
     console.error('❌ Load test failed:', err);
     process.exit(1);
 });
+</file>
+
+<file path="load-tests/load-test-all.js">
+const autocannon = require('autocannon');
+const axios = require('axios');
+
+const BASE_URLS = {
+    identity: 'http://localhost:3001',
+    stock: 'http://localhost:3002',
+    order: 'http://localhost:3003',
+    kitchen: 'http://localhost:3004',
+    notification: 'http://localhost:3005'
+};
+
+const results = [];
+
+async function runTest(name, config) {
+    return new Promise((resolve) => {
+        console.log(`\nStarting load test: ${name}`);
+        const instance = autocannon(config, (err, result) => {
+            if (err) {
+                console.error(`Error in ${name}:`, err.message);
+                return resolve();
+            }
+            console.log(`Finished ${name}. Reqs/s: ${result.requests.average}, Avg Latency: ${result.latency.average}ms, Errors: ${result.errors}`);
+            results.push({ name, result });
+            resolve();
+        });
+    });
+}
+
+async function main() {
+    console.log("=========================================");
+    console.log("   TESTING 15 SAFE ROUTES UNDER LOAD");
+    console.log("=========================================");
+
+    // 1. HEALTH CHECKS
+    await runTest('1. Identity Provider /health (GET)', { url: `${BASE_URLS.identity}/health`, connections: 10, duration: 3 });
+    await runTest('2. Order Gateway /health (GET)', { url: `${BASE_URLS.order}/health`, connections: 10, duration: 3 });
+    await runTest('3. Stock Service /health (GET)', { url: `${BASE_URLS.stock}/health`, connections: 10, duration: 3 });
+    await runTest('4. Kitchen Queue /health (GET)', { url: `${BASE_URLS.kitchen}/health`, connections: 10, duration: 3 });
+    await runTest('5. Notification Hub /health (GET)', { url: `${BASE_URLS.notification}/health`, connections: 10, duration: 3 });
+
+    // 2. METRICS
+    await runTest('6. Identity Provider /metrics (GET)', { url: `${BASE_URLS.identity}/metrics`, connections: 10, duration: 3 });
+    await runTest('7. Order Gateway /metrics (GET)', { url: `${BASE_URLS.order}/metrics`, connections: 10, duration: 3 });
+    await runTest('8. Stock Service /metrics (GET)', { url: `${BASE_URLS.stock}/metrics`, connections: 10, duration: 3 });
+    await runTest('9. Kitchen Queue /metrics (GET)', { url: `${BASE_URLS.kitchen}/metrics`, connections: 10, duration: 3 });
+    await runTest('10. Notification Hub /metrics (GET)', { url: `${BASE_URLS.notification}/metrics`, connections: 10, duration: 3 });
+
+    // 3. CORE BUSINESS ROUTES
+    // Get token for order gateway
+    let token = '';
+    try {
+        const res = await axios.post(`${BASE_URLS.identity}/login`, { studentId: 'user123', password: 'password' });
+        token = res.data.token;
+    } catch (e) {
+        console.log("Could not obtain token: ", e.message);
+    }
+
+    await runTest('11. Identity /login (POST)', {
+        url: `${BASE_URLS.identity}/login`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ studentId: 'user123', password: 'password' })
+    });
+
+    await runTest('12. Order Gateway /order (POST)', {
+        url: `${BASE_URLS.order}/order`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey: `load-test-${Date.now()}` })
+    });
+
+    await runTest('13. Stock Service /deduct (POST)', {
+        url: `${BASE_URLS.stock}/deduct`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, orderId: `load-${Date.now()}` })
+    });
+
+    await runTest('14. Kitchen Queue /process (POST)', {
+        url: `${BASE_URLS.kitchen}/process`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ orderId: 'ord-123', itemId: 'iftar_box', quantity: 1, studentId: 'user123' })
+    });
+
+    await runTest('15. Notification Hub /notify (POST)', {
+        url: `${BASE_URLS.notification}/notify`,
+        connections: 10, duration: 3, method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ orderId: 'ord-123', studentId: 'user123', status: 'Ready' })
+    });
+
+    console.log("\n==================== SUMMARY ====================");
+    for (const r of results) {
+        if (r.result) {
+            console.log(`${r.name.padEnd(45)} => Avg: ${Math.round(r.result.requests.average)} req/s | Latency: ${Math.round(r.result.latency.average)}ms | Errors: ${r.result.errors}`);
+        }
+    }
+
+    console.log("\n=========================================");
+    console.log("   TESTING THE 5 DESTRUCTIVE CHAOS ROUTES");
+    console.log("=========================================");
+    console.log("Warning: These endpoints are designed to crash the servers immediately. Sending requests...");
+
+    try { await axios.post(`${BASE_URLS.identity}/chaos`); console.log("16. Triggered Identity Provider /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.order}/chaos`); console.log("17. Triggered Order Gateway /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.stock}/chaos`); console.log("18. Triggered Stock Service /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.kitchen}/chaos`); console.log("19. Triggered Kitchen Queue /chaos (POST)"); } catch (e) { }
+    try { await axios.post(`${BASE_URLS.notification}/chaos`); console.log("20. Triggered Notification Hub /chaos (POST)"); } catch (e) { }
+
+    console.log("\nThe 5 services have now successfully crashed as intended! Your servers will need to be restarted.");
+}
+
+main().catch(console.error);
+</file>
+
+<file path="load-tests/load-test.js">
+const autocannon = require('autocannon');
+const axios = require('axios');
+
+const BASE_URLS = {
+    identity: 'http://localhost:3001',
+    stock: 'http://localhost:3002',
+    order: 'http://localhost:3003',
+    kitchen: 'http://localhost:3004',
+    notification: 'http://localhost:3005'
+};
+
+const results = [];
+
+async function runTest(name, config) {
+    return new Promise((resolve) => {
+        console.log(`\nStarting load test: ${name}`);
+        const instance = autocannon(config, (err, result) => {
+            if (err) {
+                console.error(`Error in ${name}:`, err);
+                return resolve();
+            }
+            console.log(`Finished ${name}. Reqs/s: ${result.requests.average}, Avg Latency: ${result.latency.average}ms, Errors: ${result.errors}`);
+            results.push({ name, result });
+            resolve();
+        });
+        // autocannon.track(instance, { renderProgressBar: false });
+    });
+}
+
+async function main() {
+    console.log("Warming up services...");
+    try { await axios.get(`${BASE_URLS.identity}/health`); } catch (e) { }
+
+    // 1. Test Health Routes
+    await runTest('Identity Provider Health', {
+        url: `${BASE_URLS.identity}/health`,
+        connections: 10,
+        duration: 5,
+    });
+
+    await runTest('Order Gateway Health', {
+        url: `${BASE_URLS.order}/health`,
+        connections: 10,
+        duration: 5,
+    });
+
+    // Get token for order gateway BEFORE we rate limit the login route!
+    let token = '';
+    try {
+        const res = await axios.post(`${BASE_URLS.identity}/login`, { studentId: 'user123', password: 'password' });
+        token = res.data.token;
+    } catch (e) {
+        console.log("Could not obtain token for order gateway test.", e.message);
+    }
+
+    // 2. Test Login Route
+    await runTest('Identity Provider Login', {
+        url: `${BASE_URLS.identity}/login`,
+        connections: 10,
+        duration: 5,
+        method: 'POST',
+        headers: { 'Content-type': 'application/json' },
+        body: JSON.stringify({ studentId: 'user123', password: 'password' })
+    });
+
+    if (token) {
+        // 3. Test Order Gateway Route
+        await runTest('Order Gateway - Create Order', {
+            url: `${BASE_URLS.order}/order`,
+            connections: 10,
+            duration: 5,
+            method: 'POST',
+            headers: {
+                'Content-type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            requests: [
+                {
+                    method: 'POST',
+                    body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey: `load-test-${Date.now()}` })
+                }
+            ]
+        });
+    }
+
+    console.log("\n==================== SUMMARY ====================");
+    for (const r of results) {
+        console.log(`${r.name.padEnd(30)} => Avg: ${Math.round(r.result.requests.average)} req/s | Latency: ${Math.round(r.result.latency.average)}ms | Errors: ${r.result.errors}`);
+    }
+}
+
+main().catch(console.error);
+</file>
+
+<file path="load-tests/package.json">
+{
+  "name": "load-tests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "autocannon": "^8.0.0",
+    "axios": "^1.13.5"
+  }
+}
 </file>
 
 <file path="notification-hub/controllers/notificationController.ts">
@@ -4453,6 +4951,42 @@ export default defineConfig({
 })
 </file>
 
+<file path="scripts/chaos-monkey.js">
+const axios = require('axios');
+
+const services = [
+    'http://localhost:3001', // Identity Provider
+    'http://localhost:3002', // Stock Service
+    'http://localhost:3003', // Order Gateway
+    'http://localhost:3004', // Kitchen Queue
+    'http://localhost:3005'  // Notification Hub
+];
+
+console.log("🐒 Chaos Monkey Started...");
+console.log("I will randomly terminate services to test system resilience.");
+
+async function terminateRandomService() {
+    const randomIndex = Math.floor(Math.random() * services.length);
+    const serviceUrl = services[randomIndex];
+
+    console.log(`💀 Chaos Monkey hitting: ${serviceUrl}/chaos`);
+    try {
+        await axios.post(`${serviceUrl}/chaos`);
+    } catch (err) {
+        console.log(`Service at ${serviceUrl} is already down or unreachable.`);
+    }
+}
+
+// Every 30 seconds, there is a 30% chance of a service failure
+setInterval(() => {
+    if (Math.random() < 0.3) {
+        terminateRandomService();
+    } else {
+        console.log("🛡️ System survived this interval.");
+    }
+}, 30000);
+</file>
+
 <file path="scripts/load-test.sh">
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5913,36 +6447,6 @@ jobs:
 }
 </file>
 
-<file path="grafana/provisioning/dashboards/provider.yml">
-apiVersion: 1
-
-providers:
-  - name: 'Standard Dashboards'
-    orgId: 1
-    folder: ''
-    type: file
-    disableDeletion: false
-    editable: true
-    options:
-      path: /etc/grafana/provisioning/dashboards
-</file>
-
-<file path="grafana/provisioning/datasources/datasource.yml">
-apiVersion: 1
-
-datasources:
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
-    isDefault: true
-
-  - name: Loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-</file>
-
 <file path="identity-provider/Dockerfile">
 # Build Stage
 FROM node:18-alpine AS builder
@@ -6101,237 +6605,6 @@ CMD ["node", "dist/index.js"]
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
-  }
-}
-</file>
-
-<file path="load-tests/load-test-all.js">
-const autocannon = require('autocannon');
-const axios = require('axios');
-
-const BASE_URLS = {
-    identity: 'http://localhost:3001',
-    stock: 'http://localhost:3002',
-    order: 'http://localhost:3003',
-    kitchen: 'http://localhost:3004',
-    notification: 'http://localhost:3005'
-};
-
-const results = [];
-
-async function runTest(name, config) {
-    return new Promise((resolve) => {
-        console.log(`\nStarting load test: ${name}`);
-        const instance = autocannon(config, (err, result) => {
-            if (err) {
-                console.error(`Error in ${name}:`, err.message);
-                return resolve();
-            }
-            console.log(`Finished ${name}. Reqs/s: ${result.requests.average}, Avg Latency: ${result.latency.average}ms, Errors: ${result.errors}`);
-            results.push({ name, result });
-            resolve();
-        });
-    });
-}
-
-async function main() {
-    console.log("=========================================");
-    console.log("   TESTING 15 SAFE ROUTES UNDER LOAD");
-    console.log("=========================================");
-
-    // 1. HEALTH CHECKS
-    await runTest('1. Identity Provider /health (GET)', { url: `${BASE_URLS.identity}/health`, connections: 10, duration: 3 });
-    await runTest('2. Order Gateway /health (GET)', { url: `${BASE_URLS.order}/health`, connections: 10, duration: 3 });
-    await runTest('3. Stock Service /health (GET)', { url: `${BASE_URLS.stock}/health`, connections: 10, duration: 3 });
-    await runTest('4. Kitchen Queue /health (GET)', { url: `${BASE_URLS.kitchen}/health`, connections: 10, duration: 3 });
-    await runTest('5. Notification Hub /health (GET)', { url: `${BASE_URLS.notification}/health`, connections: 10, duration: 3 });
-
-    // 2. METRICS
-    await runTest('6. Identity Provider /metrics (GET)', { url: `${BASE_URLS.identity}/metrics`, connections: 10, duration: 3 });
-    await runTest('7. Order Gateway /metrics (GET)', { url: `${BASE_URLS.order}/metrics`, connections: 10, duration: 3 });
-    await runTest('8. Stock Service /metrics (GET)', { url: `${BASE_URLS.stock}/metrics`, connections: 10, duration: 3 });
-    await runTest('9. Kitchen Queue /metrics (GET)', { url: `${BASE_URLS.kitchen}/metrics`, connections: 10, duration: 3 });
-    await runTest('10. Notification Hub /metrics (GET)', { url: `${BASE_URLS.notification}/metrics`, connections: 10, duration: 3 });
-
-    // 3. CORE BUSINESS ROUTES
-    // Get token for order gateway
-    let token = '';
-    try {
-        const res = await axios.post(`${BASE_URLS.identity}/login`, { studentId: 'user123', password: 'password' });
-        token = res.data.token;
-    } catch (e) {
-        console.log("Could not obtain token: ", e.message);
-    }
-
-    await runTest('11. Identity /login (POST)', {
-        url: `${BASE_URLS.identity}/login`,
-        connections: 10, duration: 3, method: 'POST',
-        headers: { 'Content-type': 'application/json' },
-        body: JSON.stringify({ studentId: 'user123', password: 'password' })
-    });
-
-    await runTest('12. Order Gateway /order (POST)', {
-        url: `${BASE_URLS.order}/order`,
-        connections: 10, duration: 3, method: 'POST',
-        headers: { 'Content-type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey: `load-test-${Date.now()}` })
-    });
-
-    await runTest('13. Stock Service /deduct (POST)', {
-        url: `${BASE_URLS.stock}/deduct`,
-        connections: 10, duration: 3, method: 'POST',
-        headers: { 'Content-type': 'application/json' },
-        body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, orderId: `load-${Date.now()}` })
-    });
-
-    await runTest('14. Kitchen Queue /process (POST)', {
-        url: `${BASE_URLS.kitchen}/process`,
-        connections: 10, duration: 3, method: 'POST',
-        headers: { 'Content-type': 'application/json' },
-        body: JSON.stringify({ orderId: 'ord-123', itemId: 'iftar_box', quantity: 1, studentId: 'user123' })
-    });
-
-    await runTest('15. Notification Hub /notify (POST)', {
-        url: `${BASE_URLS.notification}/notify`,
-        connections: 10, duration: 3, method: 'POST',
-        headers: { 'Content-type': 'application/json' },
-        body: JSON.stringify({ orderId: 'ord-123', studentId: 'user123', status: 'Ready' })
-    });
-
-    console.log("\n==================== SUMMARY ====================");
-    for (const r of results) {
-        if (r.result) {
-            console.log(`${r.name.padEnd(45)} => Avg: ${Math.round(r.result.requests.average)} req/s | Latency: ${Math.round(r.result.latency.average)}ms | Errors: ${r.result.errors}`);
-        }
-    }
-
-    console.log("\n=========================================");
-    console.log("   TESTING THE 5 DESTRUCTIVE CHAOS ROUTES");
-    console.log("=========================================");
-    console.log("Warning: These endpoints are designed to crash the servers immediately. Sending requests...");
-
-    try { await axios.post(`${BASE_URLS.identity}/chaos`); console.log("16. Triggered Identity Provider /chaos (POST)"); } catch (e) { }
-    try { await axios.post(`${BASE_URLS.order}/chaos`); console.log("17. Triggered Order Gateway /chaos (POST)"); } catch (e) { }
-    try { await axios.post(`${BASE_URLS.stock}/chaos`); console.log("18. Triggered Stock Service /chaos (POST)"); } catch (e) { }
-    try { await axios.post(`${BASE_URLS.kitchen}/chaos`); console.log("19. Triggered Kitchen Queue /chaos (POST)"); } catch (e) { }
-    try { await axios.post(`${BASE_URLS.notification}/chaos`); console.log("20. Triggered Notification Hub /chaos (POST)"); } catch (e) { }
-
-    console.log("\nThe 5 services have now successfully crashed as intended! Your servers will need to be restarted.");
-}
-
-main().catch(console.error);
-</file>
-
-<file path="load-tests/load-test.js">
-const autocannon = require('autocannon');
-const axios = require('axios');
-
-const BASE_URLS = {
-    identity: 'http://localhost:3001',
-    stock: 'http://localhost:3002',
-    order: 'http://localhost:3003',
-    kitchen: 'http://localhost:3004',
-    notification: 'http://localhost:3005'
-};
-
-const results = [];
-
-async function runTest(name, config) {
-    return new Promise((resolve) => {
-        console.log(`\nStarting load test: ${name}`);
-        const instance = autocannon(config, (err, result) => {
-            if (err) {
-                console.error(`Error in ${name}:`, err);
-                return resolve();
-            }
-            console.log(`Finished ${name}. Reqs/s: ${result.requests.average}, Avg Latency: ${result.latency.average}ms, Errors: ${result.errors}`);
-            results.push({ name, result });
-            resolve();
-        });
-        // autocannon.track(instance, { renderProgressBar: false });
-    });
-}
-
-async function main() {
-    console.log("Warming up services...");
-    try { await axios.get(`${BASE_URLS.identity}/health`); } catch (e) { }
-
-    // 1. Test Health Routes
-    await runTest('Identity Provider Health', {
-        url: `${BASE_URLS.identity}/health`,
-        connections: 10,
-        duration: 5,
-    });
-
-    await runTest('Order Gateway Health', {
-        url: `${BASE_URLS.order}/health`,
-        connections: 10,
-        duration: 5,
-    });
-
-    // Get token for order gateway BEFORE we rate limit the login route!
-    let token = '';
-    try {
-        const res = await axios.post(`${BASE_URLS.identity}/login`, { studentId: 'user123', password: 'password' });
-        token = res.data.token;
-    } catch (e) {
-        console.log("Could not obtain token for order gateway test.", e.message);
-    }
-
-    // 2. Test Login Route
-    await runTest('Identity Provider Login', {
-        url: `${BASE_URLS.identity}/login`,
-        connections: 10,
-        duration: 5,
-        method: 'POST',
-        headers: { 'Content-type': 'application/json' },
-        body: JSON.stringify({ studentId: 'user123', password: 'password' })
-    });
-
-    if (token) {
-        // 3. Test Order Gateway Route
-        await runTest('Order Gateway - Create Order', {
-            url: `${BASE_URLS.order}/order`,
-            connections: 10,
-            duration: 5,
-            method: 'POST',
-            headers: {
-                'Content-type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            requests: [
-                {
-                    method: 'POST',
-                    body: JSON.stringify({ itemId: 'iftar_box', quantity: 1, idempotencyKey: `load-test-${Date.now()}` })
-                }
-            ]
-        });
-    }
-
-    console.log("\n==================== SUMMARY ====================");
-    for (const r of results) {
-        console.log(`${r.name.padEnd(30)} => Avg: ${Math.round(r.result.requests.average)} req/s | Latency: ${Math.round(r.result.latency.average)}ms | Errors: ${r.result.errors}`);
-    }
-}
-
-main().catch(console.error);
-</file>
-
-<file path="load-tests/package.json">
-{
-  "name": "load-tests",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "autocannon": "^8.0.0",
-    "axios": "^1.13.5"
   }
 }
 </file>
@@ -6583,42 +6856,6 @@ scrape_configs:
   - job_name: 'notification-hub'
     static_configs:
       - targets: ['notification-hub:3000']
-</file>
-
-<file path="scripts/chaos-monkey.js">
-const axios = require('axios');
-
-const services = [
-    'http://localhost:3001', // Identity Provider
-    'http://localhost:3002', // Stock Service
-    'http://localhost:3003', // Order Gateway
-    'http://localhost:3004', // Kitchen Queue
-    'http://localhost:3005'  // Notification Hub
-];
-
-console.log("🐒 Chaos Monkey Started...");
-console.log("I will randomly terminate services to test system resilience.");
-
-async function terminateRandomService() {
-    const randomIndex = Math.floor(Math.random() * services.length);
-    const serviceUrl = services[randomIndex];
-
-    console.log(`💀 Chaos Monkey hitting: ${serviceUrl}/chaos`);
-    try {
-        await axios.post(`${serviceUrl}/chaos`);
-    } catch (err) {
-        console.log(`Service at ${serviceUrl} is already down or unreachable.`);
-    }
-}
-
-// Every 30 seconds, there is a 30% chance of a service failure
-setInterval(() => {
-    if (Math.random() < 0.3) {
-        terminateRandomService();
-    } else {
-        console.log("🛡️ System survived this interval.");
-    }
-}, 30000);
 </file>
 
 <file path="stock-service/Dockerfile">
@@ -6976,107 +7213,104 @@ repomix-output.xml
 </file>
 
 <file path="README.md">
-# 🌙 FeastFlow: Enterprise-Grade Food Ordering Resilience Platform
+# FeastFlow - Resilient Microservices Iftar Management System 🌙
 
-> **A production-ready microservices architecture designed to handle peak food ordering surges (500+ concurrent requests) with zero data loss, high observability, and automatic self-healing.**
+FeastFlow is a high-performance, fault-tolerant microservices platform designed for high-scale cafeteria management. It demonstrates modern resilience patterns (Saga, Bulkhead, Circuit Breakers) and deep observability using the OpenTelemetry (OTEL) ecosystem.
 
-[![Load Tested](https://img.shields.io/badge/Load%20Tested-850%20req%2Fs-success?style=flat-square)](.)
-[![Distributed Tracing](https://img.shields.io/badge/Distributed%20Tracing-Jaeger-00D9FF?style=flat-square)](.)
-[![Enterprise Patterns](https://img.shields.io/badge/Enterprise%20Patterns-5%2F5-gold?style=flat-square)](.)
+Built for the **FeastFlow DevSprint 2026 Competition**, this project provides a robust solution for managing large-scale iftar meal distributions with real-time tracking and automated failovers.
 
-FeastFlow is a distributed, fault-tolerant food ordering system engineered to survive the "Ramadan Rush"—a 5:30 PM spike where hundreds of concurrent users hit the system simultaneously. Unlike traditional monoliths that fail under synchronous bottlenecks, FeastFlow uses enterprise-grade asynchronous patterns and resilience strategies to ensure 100% order integrity and high availability.
-
-![Student UI](docs/student_ui.png)
+### Project Overview & Dashboard
+<img src="docs/assets/dashboard_ui.png" alt="FeastFlow Dashboard UI" width="100%" />
 
 ---
 
-## 🏗️ System Architecture
+## 🏗 System Architecture
 
-![Architecture Blueprint](docs/architecture.png)
+The project follows a layered microservices architecture, meticulously orchestrated via Docker Compose and served through an Nginx Ingress layer.
 
-FeastFlow is built on a **containerized microservices mesh** with a clear separation of concerns across 5 core services:
+### Comprehensive Topology
+<img src="docs/assets/full_architecture.png" alt="Full Architecture Diagram" width="100%" />
 
-1.  **Identity Provider**: Secure JWT-based authentication and student verification.
-2.  **Order Gateway**: The saga orchestrator and entry point for all order operations.
-3.  **Stock Service**: Inventory management using **Optimistic Locking** to prevent race conditions.
-4.  **Kitchen Queue**: Asynchronous job processing using **BullMQ** and Redis.
-5.  **Notification Hub**: Real-time updates via **Socket.io** for order status tracking.
-
-### The Integrated Observability Stack
-- **Prometheus & Grafana**: Real-time business SLO tracking and system health monitoring.
-- **Jaeger (OpenTelemetry)**: Distributed tracing for capturing cross-service performance.
-- **Loki & Promtail**: Centralized log aggregation and order correlation across the mesh.
+### Layered View
+<img src="docs/assets/layered_architecture.png" alt="Layered Architecture View" width="80%" />
 
 ---
 
-## 🛡️ Core Engineering & Resilience Patterns
+## ⚡ Core Microservices
 
-FeastFlow implements the same patterns used by production systems at scale (Netflix, Amazon, Google) to handle failures gracefully.
-
-### 1. Distributed Tracing (200+ Traces Captured)
-Every request travels with a unique Trace ID. We use OpenTelemetry with manual context propagation to provide a 100% transparent view of the request lifecycle.
-- **Visual Proof**: [See Jaeger Waterfall View](docs/jaeger_tracing.png)
-- **Impact**: Identify cross-service bottlenecks (e.g., Kitchen latency) in milliseconds.
-
-### 2. Saga Orchestration (State Machine)
-We use a choreography-based saga pattern with an explicit **Saga State Machine** (INITIATED → STOCK_VERIFIED → IN_KITCHEN → COMPLETED/FAILED).
-- **Self-Healing**: Automatic compensation logic (e.g., restoring stock if the kitchen queue fails).
-- **Reliability**: No order is "lost"—it is always in a verifiable state.
-
-### 3. Bulkhead Isolation (pLimit)
-To prevent one slow service (like Kitchen) from crashing the entire Gateway, we implement **Bulkheads** using `p-limit`.
-- **Limits**: Stock (5 concurrent), Kitchen (10 concurrent), Notifications (20 concurrent).
-- **Fail-Fast**: Saturated services reject requests early to maintain overall system stability.
-
-### 4. Circuit Breakers (Opossum)
-Integrated with the Gateway to stop cascading failures when downstream services are unhealthy.
-- **Dynamic Recovery**: Automatically transitions between OPEN, CLOSED, and HALF_OPEN states as services recover.
-
-### 5. Event Sourcing & Auditability
-Every state change is recorded as an immutable event in the PostgreSQL `order_events` store.
-- **Replay Capability**: Ability to replay system state or audit any order's history with millisecond precision.
-- **Proof**: [Audit Log Screenshot](docs/grafana_dashboard.png)
+1.  **Identity Provider (Auth)**: Secure JWT-based authentication service.
+2.  **Order Gateway (Orchestrator)**: The central brain implementing the **Saga Pattern**. It manages the lifecycle of an order from stock deduction to kitchen queueing.
+3.  **Stock Service (Inventory)**: High-performance inventory management featuring a **Redis Hot-Cache** with a guaranteed **95%+ Cache Hit Rate**.
+4.  **Kitchen Queue (Worker)**: Asynchronous order processing using BullMQ with high-concurrency workers.
+5.  **Notification Hub**: Real-time updates delivered via WebSockets to keep students informed.
 
 ---
 
-## 📊 Performance & SLOs
+## 🛡️ Resilience & Distributed Patterns
 
-FeastFlow is rigorously load-tested to ensure it meets enterprise-grade Service Level Objectives (SLOs).
+FeastFlow is designed to be "unkillable," handling partial system failures without data loss:
 
-| Metric | Result | Target (SLO) | Status |
-|--------|--------|--------------|--------|
-| **Throughput** | 850 req/s | >500 req/s | ✅ |
-| **P50 Latency** | 95ms | <200ms | ✅ |
-| **P99 Latency** | 245ms | <500ms | ✅ |
-| **Success Rate** | 100% | >99.9% | ✅ |
-| **Stock Accuracy** | 100% | 100% | ✅ |
+### 1. The Saga Pattern (Distributed Transactions)
+*   **Synchronous Step**: Deduction of items from the Stock Service.
+*   **Asynchronous Step**: Successful deductions trigger an async job in the Kitchen Queue.
+*   **Compensation Logic**: If the Kitchen or Notification service fails, the system automatically triggers a **Stock Restore** to maintain database integrity across services.
+
+### 2. Isolation with Bulkheads & Circuit Breakers
+*   **Bulkhead Pattern**: Prevents a surge in one service from starving others. Implemented in the Order Gateway to cap concurrent requests to downstream dependencies.
+*   **Circuit Breakers (Opossum)**: Automatically "trips" and fails fast if the Stock Service or Database becomes unresponsive, preventing cascading failures across the mesh.
+
+### 3. "Hot" Caching Strategy
+*   **Cache Warming**: On startup, a Redis pipeline pre-loads the entire inventory.
+*   **Upsert-on-Commit**: When stock changes, the cache is instantly updated rather than invalidated, maintaining a professional **100% Hit Rate** even under high load.
+*   **Background Re-sync**: A periodic 60-second heartbeat ensures the cache never stays stale.
 
 ---
 
-## � Installation & Getting Started
+## 📊 Observability Command Center
+
+Monitoring is baked directly into the DNA of FeastFlow:
+
+### Command Center Dashboard
+<img src="docs/assets/grafana_command_center.png" alt="Grafana Command Center" width="100%" />
+
+### Business SLO Monitoring
+*   **Real-time KPI Tracking**: Track Order Success Rate, Cache Hit Rate, and Inventory Accuracy in real-time.
+*   **Accuracy Verification**: Our metrics loop ensures that 100% of successful events are reconciled with the database.
+
+<img src="docs/assets/grafana_business_slo.png" alt="Business Metrics Dashboard" width="100%" />
+
+### Distributed Tracing (Jaeger + OTEL)
+*   **End-to-End Visibility**: Every order generates a distributed trace, allowing you to visualize exactly how long an order spends in each service.
+*   **Context Propagation**: Trace IDs flow seamlessly from HTTP headers through BullMQ workers and into background processes.
+
+<img src="docs/assets/jaeger_tracing.png" alt="Jaeger Distributed Tracing" width="100%" />
+
+---
+
+## 🚀 Deployment & Local Setup
 
 ### Prerequisites
-- Docker & Docker Compose
-- Node.js 18+ (for local development)
+*   Docker & Docker Compose
+*   Node.js 18+ (for local development)
 
-### Deployment (One Command)
+### Quick Start (One Command)
 ```bash
 docker-compose up -d --build
 ```
 
-### Access Points
-- **Student UI**: [http://localhost](http://localhost)
-- **Identity Provider**: [http://localhost:3001](http://localhost:3001)
-- **Order Gateway**: [http://localhost:3003](http://localhost:3003)
-- **Jaeger Dashboard**: [http://localhost:16686](http://localhost:16686)
-- **Grafana Dashboard**: [http://localhost:3006](http://localhost:3006) (admin/admin)
+### Direct Access URLs
+*   **Main Dashboard**: [http://localhost:5173](http://localhost:5173)
+*   **Grafana Dashboards**: [http://localhost:3006](http://localhost:3006) (`admin`/`admin`)
+*   **Jaeger Tracing**: [http://localhost:16686](http://localhost:16686)
+*   **Prometheus**: [http://localhost:9090](http://localhost:9090)
 
 ---
 
-## 📜 Credits & License
-Built with ❤️ for **IUT DevSprint 2026** by engineers who understand that production is where distributed systems matter.
+## 🧪 Chaos Testing the Mesh
 
-**License**: MIT.
+1.  **Normal Flow**: Place an order from the React Dashboard. Verify trace in Jaeger.
+2.  **Gremlin (Latency)**: Inject artificial delays into the Stock Service. Observe the **Circuit Breaker** opening (turning Red) on the dashboard.
+3.  **Kill a Service**: Stop the `kitchen-queue` container. Notice how orders remain `STOCKED` until the service restarts, at which point the worker resumes processing from where it left off.
 </file>
 
 </files>
